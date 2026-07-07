@@ -1,6 +1,6 @@
 # Fog Explorer — 実装・デプロイガイド
 
-ハンドオフ仕様（[README.md](README.md)）と動くプロトタイプ（`Fog Explorer.dc.html`）を、**iOS PWA として動作する実アプリ**に再実装したものです。擬似GPS（自動歩行シミュレーション）は **実GPS（Geolocation API）のみ** に置き換え、状態はローカル保存 + バックエンド同期の両対応です。
+ハンドオフ仕様（[README.md](README.md)）を、**iOS PWA として動作する実アプリ**に再実装したものです。擬似GPS（自動歩行シミュレーション）は **実GPS（Geolocation API）のみ** に置き換え、状態はローカル保存 + バックエンド同期の両対応です。
 
 ## 構成（docker compose の3サービス）
 
@@ -131,9 +131,7 @@ iOS では `http://localhost` 以外だと **Geolocation API と Service Worker 
 │   ├── Dockerfile
 │   ├── db/schema.sql
 │   └── src/{index.js,db.js}
-├── README.md                   # 元のデザイン・ハンドオフ仕様
-├── Fog Explorer.dc.html        # 参考プロトタイプ（実装対象外）
-└── ios-frame.jsx               # プレビュー用ベゼル（実装対象外）
+└── README.md                   # 元のデザイン・ハンドオフ仕様
 ```
 
 ## 既知の注意点 / 今後
