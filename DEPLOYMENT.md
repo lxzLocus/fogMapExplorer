@@ -2,30 +2,28 @@
 
 ハンドオフ仕様（[README.md](README.md)）を、**iOS PWA として動作する実アプリ**に再実装したものです。擬似GPS（自動歩行シミュレーション）は **実GPS（Geolocation API）のみ** に置き換え、状態はローカル保存 + バックエンド同期の両対応です。
 
-## 構成（docker compose の3サービス）
+## 構成（docker compose の2サービス・単一イメージ）
 
 ```
-┌────────────┐     /api/*     ┌────────────┐     SQL      ┌────────────┐
-│   front    │ ─────────────▶ │  backend   │ ───────────▶ │    db      │
-│ nginx +    │  reverse proxy │ Node/Express│              │ PostgreSQL │
-│ PWA(静的)  │                │  (pg)       │              │    16      │
-└────────────┘                └────────────┘              └────────────┘
-   :8080                          :3000(内部)                :5432(内部)
+┌──────────────────────────┐      SQL      ┌────────────┐
+│           app            │ ────────────▶ │    db      │
+│ Node/Express (1イメージ) │               │ PostgreSQL │
+│  /api ＋ PWA(静的)を配信  │               │    16      │
+└──────────────────────────┘               └────────────┘
+        :8080 (→内部3000)                     :5432(内部)
 ```
 
 | サービス | 技術 | 役割 |
 |---|---|---|
-| **front** | Vite + React + `vite-plugin-pwa` を nginx で配信 | PWA本体（地図・霧・HUD・統計）。`/api` を backend へプロキシ |
-| **backend** | Node 20 + Express + `pg` | デバイスIDベースの匿名状態同期 API |
-| **db** | PostgreSQL 16 | 探索状態（訪問点・セル・発見・距離）を永続化 |
+| **app** | Node 20 + Express + `pg`（フロントは Vite + React + `vite-plugin-pwa`）| **1つのイメージ**で PWA本体（地図・霧・HUD・統計）を静的配信しつつ、`/api`（認証・状態同期）も処理 |
+| **db** | PostgreSQL 16 | 探索状態（訪問点・セル・発見・距離）とユーザーを永続化 |
 
-- フロントのロジックは全て Node/JS（`frontend/src/`）。nginx は「静的配信 + `/api` プロキシ」のインフラ用途のみです。
-- backend が落ちていてもフロントは localStorage だけで完全動作します（同期は自動でスキップ）。
+- フロントとバックエンドは**単一の Docker イメージに統合**（マルチステージ: Vite でビルド → Express が `public/` から配信）。nginx は不要。
+- app が落ちていてもフロントは localStorage だけで完全動作します（同期は自動でスキップ）。
 
 ## 前提
 
 - **Docker Desktop（Docker daemon が起動していること）** と Docker Compose v2。
-  - ⚠️ 現在 Docker daemon が動いていないとのことなので、下の「起動」を実行する際は **先に Docker Desktop を起動**してください。
 - ローカル開発だけなら Node 20+ でも可（Docker不要、下の「Dockerなし開発」参照）。
 
 ## 起動（Docker）
@@ -39,11 +37,11 @@ docker compose up --build     # 初回はイメージをビルド
 - 停止: `docker compose down`（DBデータは残る） / 完全削除: `docker compose down -v`。
 - ヘルスチェック: `curl http://localhost:8080/api/health` → `{"ok":true,"db":true}`。
 
-> 初回ビルドは frontend で `npm install` + `vite build`（+ sharp によるアイコン生成）を行うため数分かかります。
+> `docker compose up` は `db` の起動を待ってから `app` を立ち上げます（ヘルスチェック連動）。初回ビルドは frontend の `npm ci` + `vite build`（+ sharp によるアイコン生成）を含むため数分かかります。ポートは `.env` の `APP_PORT` で変更できます。
 
 ### GHCR のプレビルドイメージを使う場合（ビルドしない）
 
-`.env` に `FRONT_IMAGE` / `BACKEND_IMAGE`（GitHub Actions が push したタグ）を設定し:
+`.env` に `APP_IMAGE`（GitHub Actions が push したタグ）を設定し:
 
 ```bash
 docker compose pull
@@ -106,7 +104,7 @@ iOS では `http://localhost` 以外だと **Geolocation API と Service Worker 
 
 - ワークフロー: [.github/workflows/docker-build.yml](.github/workflows/docker-build.yml)
 - トリガー: `main` への push / `v*` タグ / PR / 手動（`workflow_dispatch`）。
-- front・backend を **matrix で並列ビルド**し、`main` push とタグ時に **GHCR**（`ghcr.io/<owner>/<repo>-frontend` / `-backend`）へ push。PR ではビルド検証のみ（push しない）。
+- **単一イメージ**をビルドし、`main` push とタグ時に **GHCR**（`ghcr.io/<owner>/<repo>`）へ push。PR ではビルド検証のみ（push しない）。→ パッケージは1つだけになります。
 - タグ付け: ブランチ名 / semver（`v1.2.3`）/ commit SHA / `latest`（デフォルトブランチ）。
 - 追加設定は不要（`GITHUB_TOKEN` を使用）。パッケージを public にするか、pull 時に GHCR ログインするかは GitHub のパッケージ設定で調整してください。
 
@@ -114,21 +112,21 @@ iOS では `http://localhost` 以外だと **Geolocation API と Service Worker 
 
 ```
 .
-├── docker-compose.yml          # front / backend / db
+├── Dockerfile                  # 単一イメージ: frontend build -> Node が API+PWA を配信
+├── .dockerignore
+├── docker-compose.yml          # app / db（2サービス）
 ├── .env.example
 ├── .github/workflows/docker-build.yml
-├── frontend/                   # Vite + React PWA
-│   ├── Dockerfile              # build(node) -> nginx
-│   ├── nginx.conf              # 静的配信 + /api プロキシ + SW no-cache
+├── frontend/                   # Vite + React PWA（イメージ内でビルド）
 │   ├── scripts/generate-icons.mjs
 │   └── src/
-│       ├── App.jsx             # UI（HUD/ログ/統計/設定/タブ）
+│       ├── App.jsx             # UI（HUD/ログ/統計/アカウント/タブ）
 │       ├── lib/mapController.js# 地図・霧マスク・GPS・スポット発見・同期
 │       ├── lib/landmarks.js    # スポット定義・ブリップSVG
+│       ├── lib/auth.js         # メール/パスワード認証（token 保存）
 │       ├── lib/storage.js      # localStorage + デバイスID
 │       └── lib/api.js          # backend 同期（失敗時は無視）
-├── backend/                    # Express + pg
-│   ├── Dockerfile
+├── backend/                    # Express + pg（/api ＋ 静的PWA配信）
 │   ├── db/schema.sql
 │   └── src/{index.js,db.js}
 └── README.md                   # 元のデザイン・ハンドオフ仕様
@@ -136,6 +134,6 @@ iOS では `http://localhost` 以外だと **Geolocation API と Service Worker 
 
 ## 既知の注意点 / 今後
 
-- `package-lock.json` はコミット済みで、両 Dockerfile は再現性のため `npm ci` を使用。依存を更新したら `npm install` でロックを更新してください。
+- `package-lock.json`（frontend/backend 各1）はコミット済みで、Dockerfile は再現性のため `npm ci` を使用。依存を更新したら該当ディレクトリで `npm install` してロックを更新してください。
 - 地図タイルは CARTO（利用規約・attribution 必須。地図上に表示済み）。
 - 認証なしの匿名同期です。公開運用ではレート制限・認証の追加を検討してください。

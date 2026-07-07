@@ -1,0 +1,12 @@
+# Build context is the repo root now (single image).
+**/node_modules
+**/dist
+**/dev-dist
+frontend/public/icons
+frontend/public/apple-touch-icon.png
+.git
+.github
+.env
+.env.*
+!.env.example
+*.md

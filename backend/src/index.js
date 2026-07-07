@@ -1,7 +1,14 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import express from 'express'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { pool, ensureSchema, dbOk } from './db.js'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+// Built frontend (PWA) copied here in the Docker image. Absent in local dev
+// (where Vite serves the frontend and proxies /api here) — that's fine.
+const PUBLIC_DIR = process.env.PUBLIC_DIR || path.resolve(__dirname, '../public')
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-insecure-secret-change-me'
 if (JWT_SECRET === 'dev-insecure-secret-change-me') {
@@ -186,6 +193,32 @@ app.put('/api/state', async (req, res) => {
     console.error('[PUT /api/state]', e)
     res.status(500).json({ error: 'server error' })
   }
+})
+
+// --- static frontend (single-image deploy) ----------------------------------
+// Serve the built PWA. The API routes above are matched first; anything else
+// falls through to here.
+app.use(
+  express.static(PUBLIC_DIR, {
+    setHeaders(res, filePath) {
+      const base = path.basename(filePath)
+      if (base === 'sw.js' || base === 'index.html' || base === 'manifest.webmanifest') {
+        res.setHeader('Cache-Control', 'no-cache')
+      } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+      }
+    },
+  }),
+)
+
+// SPA fallback: serve index.html for client-side navigations (GET, HTML, non-API).
+app.use((req, res, next) => {
+  if (req.method !== 'GET') return next()
+  if (req.path.startsWith('/api/')) return next()
+  if (!(req.headers.accept || '').includes('text/html')) return next()
+  res.sendFile(path.join(PUBLIC_DIR, 'index.html'), (err) => {
+    if (err) next()
+  })
 })
 
 const port = Number(process.env.PORT ?? 3000)

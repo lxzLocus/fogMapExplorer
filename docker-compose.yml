@@ -17,27 +17,22 @@ services:
     # ports:
     #   - "5432:5432"
 
-  backend:
-    build: ./backend
-    image: ${BACKEND_IMAGE:-fog-explorer-backend:local}
+  # Single image: Node/Express serves both the API (/api) and the static PWA.
+  app:
+    build:
+      context: .
+    image: ${APP_IMAGE:-fog-explorer:local}
     restart: unless-stopped
     environment:
       NODE_ENV: production
       PORT: "3000"
       DATABASE_URL: postgres://${POSTGRES_USER:-fog}:${POSTGRES_PASSWORD:-fogpass}@db:5432/${POSTGRES_DB:-fogexplorer}
       JWT_SECRET: ${JWT_SECRET:-dev-insecure-secret-change-me}
+    ports:
+      - "${APP_PORT:-8080}:3000"
     depends_on:
       db:
         condition: service_healthy
-
-  front:
-    build: ./frontend
-    image: ${FRONT_IMAGE:-fog-explorer-frontend:local}
-    restart: unless-stopped
-    ports:
-      - "${FRONT_PORT:-8080}:80"
-    depends_on:
-      - backend
 
 volumes:
   db-data:

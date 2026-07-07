@@ -1,8 +1,0 @@
-node_modules
-dist
-dev-dist
-.env
-.env.*
-public/icons
-public/apple-touch-icon.png
-*.md
