@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/dev-dist
+frontend/public/icons
+frontend/public/apple-touch-icon.png
+.git
+.env
+.env.*
+!.env.example

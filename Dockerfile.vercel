@@ -1,0 +1,29 @@
+# Vercel container deploy (Vercel's Dockerfile support).
+# Same single-image build as ./Dockerfile, but tuned for Vercel's runtime:
+#   - the server listens on $PORT (Vercel injects it; default 80 here)
+#   - runs as root so it can bind the injected port
+# Build context = repo root. Requires an external managed Postgres via DATABASE_URL.
+
+# ---- stage 1: build the frontend (Vite) ----
+FROM node:20-slim AS frontend
+WORKDIR /fe
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ---- stage 2: runtime (Node serves API + static PWA) ----
+FROM node:20-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+# Vercel routes external traffic to $PORT; default to 80 if unset.
+ENV PORT=80
+
+COPY backend/package.json backend/package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY backend/ ./
+COPY --from=frontend /fe/dist ./public
+
+EXPOSE 80
+CMD ["node", "src/index.js"]

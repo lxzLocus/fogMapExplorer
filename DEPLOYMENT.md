@@ -48,6 +48,49 @@ docker compose pull
 docker compose up -d
 ```
 
+## Vercel でデプロイ
+
+Vercel の **Dockerfile（コンテナ）サポート**を使い、この単一イメージをそのまま Vercel 上の HTTP サーバーとして動かします。用意済みのファイル:
+
+- [`Dockerfile.vercel`](Dockerfile.vercel) — `./Dockerfile` と同じ単一イメージ。サーバーは Vercel が注入する `$PORT`（デフォルト80）でリッスン。
+- [`vercel.json`](vercel.json) — `Dockerfile.vercel` を使う設定。
+
+> ⚠️ **DB は Vercel では動きません**。コンテナはステートレスなので、**マネージド Postgres** を別途用意して `DATABASE_URL` で接続します（Vercel Postgres = Neon、または [Neon](https://neon.tech) / Supabase の無料枠）。
+>
+> ⚠️ Vercel の Dockerfile サポートは比較的新しい機能です。`vercel.json` の記法は変わる可能性があるので、うまくいかない場合は最新の Vercel ドキュメントに合わせて調整してください（`vercel.json` を消して root の `Dockerfile.vercel` 自動検出に任せる手もあります）。エラーが出たら内容を共有してください。
+
+### 手順
+
+1. **マネージド Postgres を作成**（例: Vercel ダッシュボード → Storage → Postgres、または neon.tech）。接続文字列を控える。通常 `?sslmode=require` 付き:
+   ```
+   postgres://USER:PASS@ep-xxx.neon.tech/dbname?sslmode=require
+   ```
+2. **Vercel プロジェクト作成 & リンク**:
+   ```bash
+   npm i -g vercel
+   vercel login
+   vercel link
+   ```
+3. **環境変数を設定**（Vercel ダッシュボード → Settings → Environment Variables、または `vercel env add`）:
+   | 変数 | 値 |
+   |---|---|
+   | `DATABASE_URL` | 上の接続文字列（`?sslmode=require` 付き） |
+   | `JWT_SECRET` | 長いランダム文字列（`openssl rand -hex 32`） |
+   | `DATABASE_SSL` | `require`（接続文字列に `sslmode=require` が無い場合のみ） |
+
+   `PORT` は Vercel が自動注入するので設定不要です。
+4. **デプロイ**:
+   ```bash
+   vercel deploy --prod
+   ```
+   ビルド時にイメージが Vercel Container Registry に push され、公開URLが発行されます。
+
+### Vercel のうれしい点
+
+- **HTTPS が自動**なので、発行された `https://…vercel.app` を iPhone Safari で開けば、トンネル無しでそのまま **PWA としてホーム画面に追加**できます（localhost で必要だった cloudflared/ngrok が不要）。
+- スキーマは起動時に `ensureSchema()` が冪等に作成するので、DB用意後は初回起動で自動セットアップされます。
+- 課金は Active CPU モデル（I/O待機中は非課金）。コールドスタート時にコンテナが起動し直す場合があります。
+
 ## Dockerなし開発（Node）
 
 2つのターミナルで:
@@ -113,7 +156,10 @@ iOS では `http://localhost` 以外だと **Geolocation API と Service Worker 
 ```
 .
 ├── Dockerfile                  # 単一イメージ: frontend build -> Node が API+PWA を配信
+├── Dockerfile.vercel           # Vercel 用（$PORT でリッスン）
+├── vercel.json                 # Vercel コンテナデプロイ設定
 ├── .dockerignore
+├── .vercelignore
 ├── docker-compose.yml          # app / db（2サービス）
 ├── .env.example
 ├── .github/workflows/docker-build.yml
