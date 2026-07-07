@@ -1,0 +1,89 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #0a0d12;
+  font-family: 'Noto Sans JP', system-ui, sans-serif;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* Leaflet dark theme tweaks (from the prototype) */
+.leaflet-container {
+  background: #0a0d12;
+  font-family: 'Noto Sans JP', sans-serif;
+  outline: none;
+}
+.leaflet-control-attribution {
+  background: rgba(10, 13, 18, 0.6) !important;
+  color: #4a5568 !important;
+  font-size: 9px !important;
+}
+.leaflet-control-attribution a {
+  color: #5a6a80 !important;
+}
+.leaflet-popup-content-wrapper {
+  background: rgba(8, 11, 16, 0.95);
+  color: #eef2f8;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+}
+.leaflet-popup-tip {
+  background: rgba(8, 11, 16, 0.95);
+}
+
+@keyframes fx-pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+@keyframes fx-toast {
+  0% {
+    transform: translateY(-16px);
+    opacity: 0;
+  }
+  12% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  85% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+}
+@keyframes fx-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}

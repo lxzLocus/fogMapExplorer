@@ -1,0 +1,43 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fog}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fogpass}
+      POSTGRES_DB: ${POSTGRES_DB:-fogexplorer}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fog} -d ${POSTGRES_DB:-fogexplorer}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    # Uncomment to inspect the DB from the host:
+    # ports:
+    #   - "5432:5432"
+
+  backend:
+    build: ./backend
+    image: ${BACKEND_IMAGE:-fog-explorer-backend:local}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgres://${POSTGRES_USER:-fog}:${POSTGRES_PASSWORD:-fogpass}@db:5432/${POSTGRES_DB:-fogexplorer}
+      JWT_SECRET: ${JWT_SECRET:-dev-insecure-secret-change-me}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  front:
+    build: ./frontend
+    image: ${FRONT_IMAGE:-fog-explorer-frontend:local}
+    restart: unless-stopped
+    ports:
+      - "${FRONT_PORT:-8080}:80"
+    depends_on:
+      - backend
+
+volumes:
+  db-data:

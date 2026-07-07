@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  body { margin:0; background:#101216; display:flex; justify-content:center; padding:28px 0; font-family:'Noto Sans JP',sans-serif; }
+  .leaflet-container { background:#0a0d12; font-family:'Noto Sans JP',sans-serif; }
+  .leaflet-control-attribution { background:rgba(10,13,18,.6)!important; color:#4a5568!important; font-size:8px!important; }
+  .leaflet-control-attribution a { color:#5a6a80!important; }
+  @keyframes fx-pulse { 0%{transform:scale(.6);opacity:.8} 100%{transform:scale(2.4);opacity:0} }
+  @keyframes fx-toast { 0%{transform:translateY(-16px);opacity:0} 12%{transform:translateY(0);opacity:1} 85%{transform:translateY(0);opacity:1} 100%{transform:translateY(-10px);opacity:0} }
+  @keyframes fx-blink { 0%,100%{opacity:1} 50%{opacity:.25} }
+</style>
+</helmet>
+
+<x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" hint-size="402px,874px">
+  <div style="position:relative; width:100%; height:100%; background:#0a0d12; overflow:hidden;">
+
+    <!-- MAP -->
+    <div ref="{{ mapRef }}" style="position:absolute; inset:0;"></div>
+
+    <!-- FOG overlay (appearance + mask driven from logic) -->
+    <div ref="{{ fogRef }}" style="position:absolute; inset:0; pointer-events:none; z-index:400;"></div>
+
+    <!-- vignette -->
+    <div style="position:absolute; inset:0; pointer-events:none; z-index:401; box-shadow:inset 0 0 90px 30px rgba(0,0,0,.55);"></div>
+
+    <!-- HUD top -->
+    <div style="position:absolute; top:62px; left:14px; right:14px; z-index:500; display:flex; align-items:flex-start; justify-content:space-between; pointer-events:none;">
+      <div style="background:rgba(8,11,16,.78); backdrop-filter:blur(8px); border:1px solid rgba(255,255,255,.09); border-radius:10px; padding:10px 14px; display:flex; flex-direction:column; gap:2px;">
+        <div style="font-family:Oswald,sans-serif; font-size:11px; letter-spacing:2.5px; color:#7e8ba0; text-transform:uppercase;">探索率</div>
+        <div style="display:flex; align-items:baseline; gap:4px;">
+          <span style="font-family:Oswald,sans-serif; font-weight:700; font-size:32px; line-height:1; color:{{ accent }};">{{ exploredPct }}</span>
+          <span style="font-family:Oswald,sans-serif; font-size:16px; color:{{ accent }};">%</span>
+        </div>
+      </div>
+      <div style="background:rgba(8,11,16,.78); backdrop-filter:blur(8px); border:1px solid rgba(255,255,255,.09); border-radius:10px; padding:10px 14px; display:flex; flex-direction:column; gap:2px; align-items:flex-end;">
+        <div style="font-family:Oswald,sans-serif; font-size:11px; letter-spacing:2.5px; color:#7e8ba0;">LEVEL</div>
+        <div style="font-family:Oswald,sans-serif; font-weight:700; font-size:32px; line-height:1; color:#e8ecf4;">{{ level }}</div>
+      </div>
+    </div>
+
+    <!-- discovery toast -->
+    <sc-if value="{{ toast }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute; top:150px; left:0; right:0; z-index:600; display:flex; justify-content:center; pointer-events:none;">
+        <div style="animation:fx-toast 3.4s ease forwards; background:rgba(8,11,16,.92); border:1px solid {{ accent }}; border-radius:8px; padding:10px 18px; display:flex; flex-direction:column; gap:2px; align-items:center; box-shadow:0 0 24px {{ accentGlow }};">
+          <div style="font-family:Oswald,sans-serif; font-size:10px; letter-spacing:3px; color:{{ accent }};">NEW AREA DISCOVERED</div>
+          <div style="font-family:'Noto Sans JP',sans-serif; font-weight:700; font-size:16px; color:#fff;">{{ toast }}</div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- map controls -->
+    <sc-if value="{{ isMapTab }}" hint-placeholder-val="{{ true }}">
+      <div style="position:absolute; right:14px; bottom:118px; z-index:500; display:flex; flex-direction:column; gap:10px;">
+        <button onClick="{{ togglePlay }}" style="width:54px; height:54px; border-radius:50%; border:1px solid rgba(255,255,255,.14); background:rgba(8,11,16,.85); backdrop-filter:blur(8px); color:{{ accent }}; font-size:20px; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 16px rgba(0,0,0,.5);">{{ playIcon }}</button>
+        <button onClick="{{ recenter }}" style="width:54px; height:54px; border-radius:50%; border:1px solid rgba(255,255,255,.14); background:rgba(8,11,16,.85); backdrop-filter:blur(8px); color:#c8d2e0; font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 16px rgba(0,0,0,.5);">◎</button>
+      </div>
+      <div style="position:absolute; left:0; right:0; bottom:118px; z-index:490; display:flex; justify-content:center; pointer-events:none;">
+        <div style="background:rgba(8,11,16,.7); border-radius:999px; padding:6px 14px; font-size:11px; color:#8a96aa;">{{ hintText }}</div>
+      </div>
+    </sc-if>
+
+    <!-- TIMELINE panel -->
+    <sc-if value="{{ isLogTab }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute; inset:0; z-index:520; background:rgba(7,10,14,.94); backdrop-filter:blur(10px); padding:130px 20px 110px; overflow-y:auto; box-sizing:border-box;">
+        <div style="font-family:Oswald,sans-serif; font-size:13px; letter-spacing:3px; color:#7e8ba0; margin-bottom:16px;">DISCOVERY LOG — 発見の記録</div>
+        <sc-if value="{{ hasNoDiscoveries }}" hint-placeholder-val="{{ false }}">
+          <div style="color:#5a6578; font-size:13px; padding:24px 0; text-align:center;">まだ発見はありません。<br>マップを歩いて霧を晴らしましょう。</div>
+        </sc-if>
+        <div style="display:flex; flex-direction:column; gap:0;">
+          <sc-for list="{{ discoveriesDesc }}" as="d" hint-placeholder-count="0">
+            <div style="display:flex; gap:14px; padding:12px 0; border-bottom:1px solid rgba(255,255,255,.06);">
+              <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+                <div style="width:10px; height:10px; border-radius:50%; background:{{ accent }}; box-shadow:0 0 8px {{ accentGlow }}; margin-top:4px;"></div>
+                <div style="flex:1; width:1px; background:rgba(255,255,255,.08);"></div>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:2px;">
+                <div style="font-weight:700; font-size:15px; color:#eef2f8;">{{ d.name }}</div>
+                <div style="font-size:11px; color:#6b7788;">{{ d.time }} · {{ d.dist }}</div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- STATS panel -->
+    <sc-if value="{{ isStatsTab }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute; inset:0; z-index:520; background:rgba(7,10,14,.94); backdrop-filter:blur(10px); padding:130px 20px 110px; overflow-y:auto; box-sizing:border-box;">
+        <div style="font-family:Oswald,sans-serif; font-size:13px; letter-spacing:3px; color:#7e8ba0; margin-bottom:18px;">EXPLORATION STATS — 統計</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div style="background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:16px;">
+            <div style="font-size:11px; color:#7e8ba0; margin-bottom:6px;">探索率(都心部)</div>
+            <div style="font-family:Oswald,sans-serif; font-weight:700; font-size:30px; color:{{ accent }};">{{ exploredPct }}%</div>
+          </div>
+          <div style="background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:16px;">
+            <div style="font-size:11px; color:#7e8ba0; margin-bottom:6px;">解放面積</div>
+            <div style="font-family:Oswald,sans-serif; font-weight:700; font-size:30px; color:#e8ecf4;">{{ areaKm }}<span style="font-size:14px; color:#7e8ba0;"> km²</span></div>
+          </div>
+          <div style="background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:16px;">
+            <div style="font-size:11px; color:#7e8ba0; margin-bottom:6px;">発見スポット</div>
+            <div style="font-family:Oswald,sans-serif; font-weight:700; font-size:30px; color:#e8ecf4;">{{ discoveryCount }}<span style="font-size:14px; color:#7e8ba0;"> / {{ landmarkTotal }}</span></div>
+          </div>
+          <div style="background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:16px;">
+            <div style="font-size:11px; color:#7e8ba0; margin-bottom:6px;">総移動距離</div>
+            <div style="font-family:Oswald,sans-serif; font-weight:700; font-size:30px; color:#e8ecf4;">{{ distKm }}<span style="font-size:14px; color:#7e8ba0;"> km</span></div>
+          </div>
+        </div>
+        <div style="margin-top:20px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px;">
+            <div style="font-size:12px; color:#c8d2e0; font-weight:700;">LEVEL {{ level }}</div>
+            <div style="font-size:11px; color:#7e8ba0;">次のレベルまで {{ xpToNext }}</div>
+          </div>
+          <div style="height:8px; border-radius:4px; background:rgba(255,255,255,.08); overflow:hidden;">
+            <div style="height:100%; width:{{ xpPct }}; background:{{ accent }}; border-radius:4px; box-shadow:0 0 10px {{ accentGlow }};"></div>
+          </div>
+        </div>
+        <button onClick="{{ resetFog }}" style="margin-top:24px; width:100%; padding:13px; border-radius:10px; border:1px solid rgba(255,80,80,.35); background:rgba(255,60,60,.08); color:#ff7a7a; font-family:'Noto Sans JP',sans-serif; font-weight:700; font-size:13px; cursor:pointer;">霧をリセット（全消去）</button>
+      </div>
+    </sc-if>
+
+    <!-- bottom tab bar -->
+    <div style="position:absolute; left:14px; right:14px; bottom:34px; z-index:540; display:flex; gap:6px; background:rgba(8,11,16,.85); backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,.1); border-radius:16px; padding:6px;">
+      <button onClick="{{ goMap }}" style="flex:1; padding:10px 0 8px; border:none; border-radius:11px; background:{{ mapTabBg }}; color:{{ mapTabColor }}; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:2px;">
+        <span style="font-size:16px; line-height:1;">◈</span>
+        <span style="font-family:'Noto Sans JP',sans-serif; font-size:10px; font-weight:700;">マップ</span>
+      </button>
+      <button onClick="{{ goLog }}" style="flex:1; padding:10px 0 8px; border:none; border-radius:11px; background:{{ logTabBg }}; color:{{ logTabColor }}; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:2px;">
+        <span style="font-size:16px; line-height:1;">◷</span>
+        <span style="font-family:'Noto Sans JP',sans-serif; font-size:10px; font-weight:700;">発見</span>
+      </button>
+      <button onClick="{{ goStats }}" style="flex:1; padding:10px 0 8px; border:none; border-radius:11px; background:{{ statsTabBg }}; color:{{ statsTabColor }}; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:2px;">
+        <span style="font-size:16px; line-height:1;">▦</span>
+        <span style="font-family:'Noto Sans JP',sans-serif; font-size:10px; font-weight:700;">統計</span>
+      </button>
+    </div>
+
+  </div>
+</x-import>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;: {&quot;width&quot;: 470, &quot;height&quot;: 940}, &quot;fogStyle&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;blur&quot;, &quot;black&quot;, &quot;grid&quot;], &quot;default&quot;: &quot;blur&quot;, &quot;tsType&quot;: &quot;'blur' | 'black' | 'grid'&quot;, &quot;section&quot;: &quot;霧の表現&quot;}, &quot;revealRadius&quot;: {&quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 1000, &quot;min&quot;: 100, &quot;max&quot;: 2000, &quot;step&quot;: 50, &quot;unit&quot;: &quot;m&quot;, &quot;section&quot;: &quot;探索&quot;}, &quot;walkSpeed&quot;: {&quot;editor&quot;: &quot;range&quot;, &quot;default&quot;: 9, &quot;min&quot;: 2, &quot;max&quot;: 40, &quot;step&quot;: 1, &quot;unit&quot;: &quot;m/s&quot;, &quot;section&quot;: &quot;探索&quot;}, &quot;accent&quot;: {&quot;editor&quot;: &quot;color&quot;, &quot;options&quot;: [&quot;#7CFC9B&quot;, &quot;#5EC8FF&quot;, &quot;#FFD166&quot;, &quot;#FF7A5C&quot;], &quot;default&quot;: &quot;#7CFC9B&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;section&quot;: &quot;テーマ&quot;}}">
+class Component extends DCLogic {
+  state = {
+    tab: 'map',
+    playing: true,
+    exploredPct: '0.0',
+    areaKm: '0.0',
+    distKm: '0.0',
+    level: 1,
+    xpPct: 0,
+    xpToNext: '',
+    discoveries: [],
+    toast: null,
+  };
+
+  // ---- constants ----
+  LANDMARKS = [
+    { name: '渋谷スクランブル交差点', lat: 35.6595, lng: 139.7005, kind: 'star', hue: '#FFD166' },
+    { name: '代々木公園', lat: 35.6712, lng: 139.6949, kind: 'park', hue: '#7CFC9B' },
+    { name: '明治神宮', lat: 35.6764, lng: 139.6993, kind: 'shrine', hue: '#FF7A5C' },
+    { name: '原宿駅', lat: 35.6702, lng: 139.7027, kind: 'station', hue: '#5EC8FF' },
+    { name: '表参道ヒルズ', lat: 35.6672, lng: 139.7091, kind: 'shop', hue: '#fff' },
+    { name: '代官山', lat: 35.6481, lng: 139.7031, kind: 'shop', hue: '#fff' },
+    { name: '恵比寿ガーデンプレイス', lat: 35.6425, lng: 139.7130, kind: 'shop', hue: '#fff' },
+    { name: '新宿駅', lat: 35.6896, lng: 139.7006, kind: 'station', hue: '#5EC8FF' },
+    { name: '新宿御苑', lat: 35.6852, lng: 139.7100, kind: 'park', hue: '#7CFC9B' },
+    { name: '目黒川', lat: 35.6437, lng: 139.6989, kind: 'river', hue: '#5EC8FF' },
+    { name: '国立競技場', lat: 35.6779, lng: 139.7143, kind: 'flag', hue: '#FFD166' },
+    { name: '六本木ヒルズ', lat: 35.6605, lng: 139.7292, kind: 'shop', hue: '#fff' },
+  ];
+  BOUNDS = { latMin: 35.62, latMax: 35.72, lngMin: 139.65, lngMax: 139.77 };
+  CELL = 250; // meters
+
+  constructor(props) {
+    super(props);
+    this.mapRef = React.createRef();
+    this.fogRef = React.createRef();
+    this.visited = [];   // {lat,lng}
+    this.cells = new Set();
+    this.totalDist = 0;
+    this.heading = Math.random() * Math.PI * 2;
+    this.target = null;
+    this.fogDirty = false;
+  }
+
+  // ---- geo helpers ----
+  mPerLng(lat) { return 111320 * Math.cos(lat * Math.PI / 180); }
+  distM(a, b) {
+    const dy = (b.lat - a.lat) * 111320;
+    const dx = (b.lng - a.lng) * this.mPerLng(a.lat);
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  radius() { return this.props.revealRadius ?? 1000; }
+  speed() { return this.props.walkSpeed ?? 9; }
+  accent() { return this.props.accent ?? '#7CFC9B'; }
+  fogStyle() { return this.props.fogStyle ?? 'blur'; }
+
+  totalCells() {
+    const b = this.BOUNDS;
+    const ny = Math.ceil((b.latMax - b.latMin) * 111320 / this.CELL);
+    const nx = Math.ceil((b.lngMax - b.lngMin) * this.mPerLng((b.latMin + b.latMax) / 2) / this.CELL);
+    return nx * ny;
+  }
+
+  addCells(p) {
+    const b = this.BOUNDS, r = this.radius();
+    const dLat = r / 111320, dLng = r / this.mPerLng(p.lat);
+    const stepLat = this.CELL / 111320, stepLng = this.CELL / this.mPerLng(p.lat);
+    for (let la = p.lat - dLat; la <= p.lat + dLat; la += stepLat) {
+      for (let lo = p.lng - dLng; lo <= p.lng + dLng; lo += stepLng) {
+        if (la < b.latMin || la > b.latMax || lo < b.lngMin || lo > b.lngMax) continue;
+        if (this.distM(p, { lat: la, lng: lo }) > r) continue;
+        const key = Math.round((la - b.latMin) * 111320 / this.CELL) + ':' +
+                    Math.round((lo - b.lngMin) * this.mPerLng(la) / this.CELL);
+        this.cells.add(key);
+      }
+    }
+  }
+
+  // ---- lifecycle ----
+  componentDidMount() {
+    this.waitL = setInterval(() => {
+      if (window.L && this.mapRef.current) { clearInterval(this.waitL); this.initMap(); }
+    }, 60);
+  }
+  componentWillUnmount() {
+    clearInterval(this.waitL); clearInterval(this.tick);
+    if (this.map) this.map.remove();
+  }
+
+  initMap() {
+    const L = window.L;
+    const saved = this.load();
+    this.pos = saved.pos || { lat: 35.6595, lng: 139.7005 };
+    this.visited = saved.visited || [{ ...this.pos }];
+    this.totalDist = saved.totalDist || 0;
+    const discoveries = saved.discoveries || [];
+    this.cells = new Set(saved.cells || []);
+    if (!saved.cells) this.visited.forEach(p => this.addCells(p));
+
+    const map = L.map(this.mapRef.current, {
+      center: [this.pos.lat, this.pos.lng], zoom: 14,
+      zoomControl: false, attributionControl: true,
+    });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19,
+    }).addTo(map);
+    this.map = map;
+
+    // player marker
+    const icon = L.divIcon({
+      className: '', iconSize: [46, 46], iconAnchor: [23, 23],
+      html: '<div style="position:relative;width:46px;height:46px;">' +
+        '<div style="position:absolute;inset:0;border-radius:50%;border:2px solid ' + this.accent() + ';animation:fx-pulse 2s ease-out infinite;"></div>' +
+        '<div data-hd style="position:absolute;left:50%;top:50%;width:0;height:0;transform:translate(-50%,-58%) rotate(0deg);border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:15px solid ' + this.accent() + ';filter:drop-shadow(0 0 6px ' + this.accent() + ');"></div>' +
+        '</div>',
+    });
+    this.marker = L.marker([this.pos.lat, this.pos.lng], { icon, zIndexOffset: 1000 }).addTo(map);
+    this.hdEl = this.marker.getElement().querySelector('[data-hd]');
+
+    map.on('click', (e) => { this.target = { lat: e.latlng.lat, lng: e.latlng.lng }; if (!this.state.playing) this.setState({ playing: true }); });
+    map.on('move zoom zoomend moveend', () => this.requestFog());
+
+    this.lmMarkers = {};
+    this.setState({ discoveries }, () => this.refreshStats());
+    this.applyFogStyle();
+    this.updateBlips();
+    this.requestFog();
+
+    this.tick = setInterval(() => this.step(), 180);
+  }
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.fogStyle !== this.props.fogStyle) this.applyFogStyle();
+    if (prevProps.revealRadius !== this.props.revealRadius) {
+      this.cells = new Set(); this.visited.forEach(p => this.addCells(p));
+      this.refreshStats(); this.requestFog();
+    }
+    if (prevProps.accent !== this.props.accent && this.map) {
+      // rebuild marker with new accent
+      this.map.removeLayer(this.marker); this.marker = null;
+      const pos = this.pos; const L = window.L;
+      const icon = L.divIcon({ className: '', iconSize: [46, 46], iconAnchor: [23, 23],
+        html: '<div style="position:relative;width:46px;height:46px;">' +
+          '<div style="position:absolute;inset:0;border-radius:50%;border:2px solid ' + this.accent() + ';animation:fx-pulse 2s ease-out infinite;"></div>' +
+          '<div data-hd style="position:absolute;left:50%;top:50%;width:0;height:0;transform:translate(-50%,-58%) rotate(0deg);border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:15px solid ' + this.accent() + ';filter:drop-shadow(0 0 6px ' + this.accent() + ');"></div>' +
+          '</div>' });
+      this.marker = L.marker([pos.lat, pos.lng], { icon, zIndexOffset: 1000 }).addTo(this.map);
+      this.hdEl = this.marker.getElement().querySelector('[data-hd]');
+    }
+  }
+
+  // ---- simulation ----
+  step() {
+    if (!this.map || !this.state.playing) return;
+    const dt = 0.18, sp = this.speed();
+    if (this.target) {
+      const d = this.distM(this.pos, this.target);
+      if (d < sp * dt * 2) { this.target = null; this.setState({ playing: false }); }
+      else this.heading = Math.atan2(
+        (this.target.lng - this.pos.lng) * this.mPerLng(this.pos.lat),
+        (this.target.lat - this.pos.lat) * 111320);
+    } else {
+      this.heading += (Math.random() - 0.5) * 0.5;
+    }
+    const dist = sp * dt;
+    const nLat = this.pos.lat + Math.cos(this.heading) * dist / 111320;
+    const nLng = this.pos.lng + Math.sin(this.heading) * dist / this.mPerLng(this.pos.lat);
+    // keep inside bounds when wandering
+    const b = this.BOUNDS;
+    if (!this.target && (nLat < b.latMin + 0.005 || nLat > b.latMax - 0.005 || nLng < b.lngMin + 0.005 || nLng > b.lngMax - 0.005)) {
+      this.heading += Math.PI; return;
+    }
+    this.totalDist += dist;
+    this.pos = { lat: nLat, lng: nLng };
+    this.marker.setLatLng([nLat, nLng]);
+    if (this.hdEl) this.hdEl.style.transform = 'translate(-50%,-58%) rotate(' + (this.heading * 180 / Math.PI) + 'deg)';
+    this.map.panTo([nLat, nLng], { animate: false });
+
+    const last = this.visited[this.visited.length - 1];
+    if (!last || this.distM(last, this.pos) > Math.max(80, this.radius() * 0.12)) {
+      this.visited.push({ ...this.pos });
+      this.addCells(this.pos);
+      this.checkLandmarks();
+      this.updateBlips();
+      this.refreshStats();
+      this.save();
+    }
+    this.requestFog();
+  }
+
+  // ---- landmark blips ----
+  inRevealed(lm) {
+    const r = this.radius();
+    for (let i = this.visited.length - 1; i >= 0; i--) {
+      if (this.distM(this.visited[i], lm) < r) return true;
+    }
+    return false;
+  }
+
+  // GTA-style flat pictogram blips: solid glyph, dark halo, no container
+  blipSvg(kind, c) {
+    const S = 'stroke="#0a0d12" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"';
+    switch (kind) {
+      case 'station': return '<rect x="5" y="4" width="12" height="11" rx="2.5" fill="' + c + '" ' + S + '/>' +
+        '<rect x="7.5" y="6.5" width="7" height="3.5" rx="0.8" fill="#0a0d12"/>' +
+        '<circle cx="8.5" cy="17.5" r="1.6" fill="' + c + '" ' + S + '/><circle cx="13.5" cy="17.5" r="1.6" fill="' + c + '" ' + S + '/>';
+      case 'park': return '<circle cx="11" cy="8.5" r="5.5" fill="' + c + '" ' + S + '/>' +
+        '<rect x="9.9" y="12" width="2.2" height="6" rx="1" fill="' + c + '" ' + S + '/>';
+      case 'shrine': return '<path d="M3.5 6 Q11 3.5 18.5 6 L17.5 8.5 H4.5 Z" fill="' + c + '" ' + S + '/>' +
+        '<rect x="5.5" y="8.5" width="2.4" height="9.5" fill="' + c + '" ' + S + '/>' +
+        '<rect x="14.1" y="8.5" width="2.4" height="9.5" fill="' + c + '" ' + S + '/>' +
+        '<rect x="4.8" y="11" width="12.4" height="1.8" fill="' + c + '" ' + S + '/>';
+      case 'shop': return '<path d="M5 8 H17 L16 18 H6 Z" fill="' + c + '" ' + S + '/>' +
+        '<path d="M8.5 8 V6.5 a2.5 2.5 0 0 1 5 0 V8" fill="none" ' + S.replace('#0a0d12', c) + ' stroke="' + c + '"/>' +
+        '<path d="M8.5 8 V6.5 a2.5 2.5 0 0 1 5 0 V8" fill="none" stroke="#0a0d12" stroke-width="0.8"/>';
+      case 'river': return '<path d="M3 8 Q6 5.5 9 8 T15 8 T21 8" fill="none" stroke="' + c + '" stroke-width="2.4" stroke-linecap="round"/>' +
+        '<path d="M3 13.5 Q6 11 9 13.5 T15 13.5 T21 13.5" fill="none" stroke="' + c + '" stroke-width="2.4" stroke-linecap="round"/>';
+      case 'flag': return '<rect x="6" y="3.5" width="1.8" height="15" rx="0.9" fill="' + c + '" ' + S + '/>' +
+        '<path d="M7.8 4.5 L17.5 7 L7.8 9.5 Z" fill="' + c + '" ' + S + '/>';
+      case 'star': default: return '<path d="M11 2.5 L13.3 8.2 L19.5 8.7 L14.8 12.6 L16.3 18.5 L11 15.2 L5.7 18.5 L7.2 12.6 L2.5 8.7 L8.7 8.2 Z" fill="' + c + '" ' + S + '/>';
+    }
+  }
+
+  blipIcon(lm, discovered) {
+    const L = window.L;
+    if (discovered) {
+      return L.divIcon({
+        className: '', iconSize: [24, 24], iconAnchor: [12, 12],
+        html: '<svg width="24" height="24" viewBox="0 0 22 22" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.9));overflow:visible;">' +
+          this.blipSvg(lm.kind, lm.hue) + '</svg>',
+      });
+    }
+    return L.divIcon({
+      className: '', iconSize: [20, 20], iconAnchor: [10, 10],
+      html: '<div style="animation:fx-blink 1.6s ease infinite;filter:drop-shadow(0 1px 2px rgba(0,0,0,.9));' +
+        'font-family:Oswald,sans-serif;font-weight:700;font-size:17px;color:#fff;text-shadow:0 0 2px #0a0d12,-1px 0 #0a0d12,1px 0 #0a0d12,0 -1px #0a0d12,0 1px #0a0d12;' +
+        'width:20px;height:20px;display:flex;align-items:center;justify-content:center;">?</div>',
+    });
+  }
+
+  updateBlips() {
+    if (!this.map || !this.lmMarkers) return;
+    const L = window.L;
+    if (this.blipV !== 2) { // icon design version — rebuild stale markers
+      this.blipV = 2;
+      for (const k in this.lmMarkers) { this.map.removeLayer(this.lmMarkers[k].marker); delete this.lmMarkers[k]; }
+    }
+    for (const lm of this.LANDMARKS) {
+      const discovered = this.state.discoveries.some(d => d.name === lm.name);
+      const revealed = discovered || this.inRevealed(lm);
+      const cur = this.lmMarkers[lm.name];
+      const want = revealed ? (discovered ? 'found' : 'hint') : 'none';
+      if (cur && cur.kind === want) continue;
+      if (cur) this.map.removeLayer(cur.marker);
+      if (want === 'none') { delete this.lmMarkers[lm.name]; continue; }
+      const marker = L.marker([lm.lat, lm.lng], {
+        icon: this.blipIcon(lm, want === 'found'), zIndexOffset: 500,
+      }).addTo(this.map);
+      marker.bindPopup('<div style="font-family:\'Noto Sans JP\',sans-serif;font-weight:700;font-size:13px;">' + (want === 'found' ? lm.name : '未発見のスポット') + '</div>', { closeButton: false, offset: [0, -26] });
+      this.lmMarkers[lm.name] = { marker, kind: want };
+    }
+  }
+
+  checkLandmarks() {
+    const found = this.state.discoveries;
+    for (const lm of this.LANDMARKS) {
+      if (found.some(d => d.name === lm.name)) continue;
+      if (this.distM(this.pos, lm) < Math.min(this.radius(), 600)) {
+        const now = new Date();
+        const entry = {
+          name: lm.name,
+          time: now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0'),
+          dist: (this.totalDist / 1000).toFixed(1) + ' km 地点',
+          t: now.getTime(),
+        };
+        this.setState(s => ({ discoveries: [...s.discoveries, entry], toast: lm.name }), () => this.updateBlips());
+        clearTimeout(this.toastT);
+        this.toastT = setTimeout(() => this.setState({ toast: null }), 3500);
+      }
+    }
+  }
+
+  refreshStats() {
+    const pct = Math.min(100, this.cells.size / this.totalCells() * 100);
+    const areaKm2 = this.cells.size * this.CELL * this.CELL / 1e6;
+    const xp = this.cells.size;
+    const level = Math.floor(Math.sqrt(xp / 30)) + 1;
+    const cur = 30 * (level - 1) * (level - 1), next = 30 * level * level;
+    this.setState({
+      exploredPct: pct.toFixed(1),
+      areaKm: areaKm2.toFixed(1),
+      distKm: (this.totalDist / 1000).toFixed(1),
+      level,
+      xpPct: Math.round((xp - cur) / (next - cur) * 100),
+      xpToNext: (next - xp) + ' セル',
+    });
+  }
+
+  // ---- fog rendering ----
+  applyFogStyle() {
+    const el = this.fogRef.current; if (!el) return;
+    const st = this.fogStyle();
+    el.style.backdropFilter = ''; el.style.webkitBackdropFilter = '';
+    if (st === 'black') {
+      el.style.background = '#04070c';
+    } else if (st === 'grid') {
+      el.style.background = 'repeating-linear-gradient(0deg, rgba(20,30,45,.9) 0 1px, #050a12 1px 22px), repeating-linear-gradient(90deg, rgba(20,30,45,.9) 0 1px, transparent 1px 22px)';
+      el.style.backgroundColor = '#050a12';
+    } else {
+      el.style.background = 'rgba(5,8,13,.62)';
+      el.style.backdropFilter = 'blur(9px) brightness(.4) saturate(.4)';
+      el.style.webkitBackdropFilter = 'blur(9px) brightness(.4) saturate(.4)';
+    }
+  }
+
+  requestFog() {
+    if (this.fogDirty) return;
+    this.fogDirty = true;
+    requestAnimationFrame(() => { this.fogDirty = false; this.drawFog(); });
+  }
+
+  drawFog() {
+    const map = this.map, el = this.fogRef.current;
+    if (!map || !el) return;
+    const w = el.clientWidth, h = el.clientHeight;
+    if (!w || !h) return;
+    if (!this.fogCanvas) this.fogCanvas = document.createElement('canvas');
+    const c = this.fogCanvas;
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.globalCompositeOperation = 'destination-out';
+    const L = window.L, r = this.radius();
+    for (const p of this.visited) {
+      const pt = map.latLngToContainerPoint(L.latLng(p.lat, p.lng));
+      const edge = map.latLngToContainerPoint(L.latLng(p.lat, p.lng + r / this.mPerLng(p.lat)));
+      const rpx = Math.abs(edge.x - pt.x);
+      if (pt.x < -rpx || pt.x > w + rpx || pt.y < -rpx || pt.y > h + rpx) continue;
+      const g = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, rpx);
+      g.addColorStop(0, 'rgba(0,0,0,1)');
+      g.addColorStop(0.65, 'rgba(0,0,0,1)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, rpx, 0, Math.PI * 2); ctx.fill();
+    }
+    const url = c.toDataURL();
+    el.style.webkitMaskImage = 'url(' + url + ')';
+    el.style.maskImage = 'url(' + url + ')';
+    el.style.webkitMaskSize = '100% 100%';
+    el.style.maskSize = '100% 100%';
+  }
+
+  // ---- persistence ----
+  save() {
+    clearTimeout(this.saveT);
+    this.saveT = setTimeout(() => {
+      try {
+        localStorage.setItem('fogexplorer_v1', JSON.stringify({
+          pos: this.pos,
+          visited: this.visited.slice(-800),
+          cells: [...this.cells],
+          totalDist: this.totalDist,
+          discoveries: this.state.discoveries,
+        }));
+      } catch (e) {}
+    }, 800);
+  }
+  load() {
+    try { return JSON.parse(localStorage.getItem('fogexplorer_v1')) || {}; } catch (e) { return {}; }
+  }
+
+  // ---- render ----
+  renderVals() {
+    const tab = this.state.tab;
+    const accent = this.accent();
+    const tabBg = (t) => tab === t ? 'rgba(255,255,255,.1)' : 'transparent';
+    const tabColor = (t) => tab === t ? accent : '#77839a';
+    const discoveriesDesc = [...this.state.discoveries].sort((a, b) => b.t - a.t);
+    return {
+      mapRef: this.mapRef,
+      fogRef: this.fogRef,
+      accent,
+      accentGlow: accent + '55',
+      exploredPct: this.state.exploredPct,
+      areaKm: this.state.areaKm,
+      distKm: this.state.distKm,
+      level: this.state.level,
+      xpPct: this.state.xpPct + '%',
+      xpToNext: this.state.xpToNext,
+      toast: this.state.toast,
+      discoveriesDesc,
+      hasNoDiscoveries: discoveriesDesc.length === 0,
+      discoveryCount: this.state.discoveries.length,
+      landmarkTotal: this.LANDMARKS.length,
+      isMapTab: tab === 'map',
+      isLogTab: tab === 'log',
+      isStatsTab: tab === 'stats',
+      mapTabBg: tabBg('map'), mapTabColor: tabColor('map'),
+      logTabBg: tabBg('log'), logTabColor: tabColor('log'),
+      statsTabBg: tabBg('stats'), statsTabColor: tabColor('stats'),
+      playIcon: this.state.playing ? '❚❚' : '▶',
+      hintText: this.state.playing ? '自動歩行中 — 地図タップで目的地へ' : '▶で歩行開始 / 地図タップで移動',
+      togglePlay: () => this.setState(s => ({ playing: !s.playing })),
+      recenter: () => { if (this.map && this.pos) this.map.setView([this.pos.lat, this.pos.lng], 14); },
+      goMap: () => this.setState({ tab: 'map' }),
+      goLog: () => this.setState({ tab: 'log' }),
+      goStats: () => this.setState({ tab: 'stats' }),
+      resetFog: () => {
+        this.visited = this.pos ? [{ ...this.pos }] : [];
+        this.cells = new Set(); this.visited.forEach(p => this.addCells(p));
+        this.totalDist = 0;
+        this.setState({ discoveries: [], tab: 'map' }, () => { this.refreshStats(); this.save(); this.updateBlips(); });
+        this.requestFog();
+      },
+    };
+  }
+}
+</script>
+</body>
+</html>
