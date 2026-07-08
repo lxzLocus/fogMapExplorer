@@ -13,6 +13,16 @@ body,
   margin: 0;
 }
 
+/* Dynamic viewport height: fills the whole screen incl. safe areas in an
+   installed iOS PWA (avoids a bottom gap under the tab bar). */
+@supports (height: 100dvh) {
+  html,
+  body,
+  #root {
+    height: 100dvh;
+  }
+}
+
 body {
   background: #0a0d12;
   font-family: 'Noto Sans JP', system-ui, sans-serif;

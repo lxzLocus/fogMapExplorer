@@ -17,9 +17,8 @@ const DEFAULTS = {
  *   onStats(stats), onDiscoveries(list), onToast(name), onStatus(text)
  */
 export class MapController {
-  constructor(container, fogEl, settings, callbacks) {
+  constructor(container, settings, callbacks) {
     this.container = container
-    this.fogEl = fogEl
     this.settings = { ...DEFAULTS, ...settings }
     this.cb = callbacks || {}
 
@@ -100,16 +99,33 @@ export class MapController {
       maxZoom: 19,
     }).addTo(map)
     this.map = map
+
+    // Fog lives in its own Leaflet pane as a <canvas>. Because it's a child of
+    // the map pane, Leaflet's pan/zoom transforms apply to it automatically, so
+    // the fog (and its reveal holes) always stays aligned with the map — during
+    // panning AND pinch-zoom. We only redraw when the view changes.
+    map.createPane('fog')
+    const fp = map.getPane('fog')
+    fp.style.zIndex = 400
+    fp.style.pointerEvents = 'none'
+    const cv = document.createElement('canvas')
+    cv.style.position = 'absolute'
+    cv.style.left = '0'
+    cv.style.top = '0'
+    fp.appendChild(cv)
+    this.fogCanvasEl = cv
+    this.fogCtx = cv.getContext('2d')
+
     this.buildMarker()
 
     map.on('dragstart', () => { this.follow = false })
-    // During a pan the fog element is cheaply translated to follow the map
-    // (onMapMove); the mask is only recomputed when movement settles. This
-    // avoids the per-frame canvas re-encode that made the fog flicker.
     map.on('zoomstart', () => { this._zooming = true })
-    map.on('zoomend', () => { this._zooming = false })
-    map.on('move', () => this.onMapMove())
-    map.on('moveend zoomend resize', () => this.requestFog())
+    map.on('zoomend', () => { this._zooming = false; this.requestFog() })
+    // Redraw as the view moves (cheap: direct canvas draw, no toDataURL). Skip
+    // during zoom animation — the pane transform scales the fog for us; we
+    // recompute once on zoomend.
+    map.on('move', () => { if (!this._zooming) this.requestFog() })
+    map.on('moveend viewreset resize', () => this.requestFog())
     // iOS PWA / rotation: the viewport can settle after launch, leaving Leaflet
     // sized smaller than its container (a gap at the bottom). Re-sync a couple
     // of times shortly after mount.
@@ -338,22 +354,11 @@ export class MapController {
 
   // ---- fog rendering ----
   applyFogStyle() {
-    const el = this.fogEl
-    if (!el) return
+    // Canvas fog can't use backdrop-filter, so the fog is a dark veil over the
+    // (already dark) map. 'black' = opaque; otherwise a strong translucent veil.
     const st = this.fogStyleV()
-    el.style.backdropFilter = ''
-    el.style.webkitBackdropFilter = ''
-    if (st === 'black') {
-      el.style.background = '#04070c'
-    } else if (st === 'grid') {
-      el.style.background =
-        'repeating-linear-gradient(0deg, rgba(20,30,45,.9) 0 1px, #050a12 1px 22px), repeating-linear-gradient(90deg, rgba(20,30,45,.9) 0 1px, transparent 1px 22px)'
-      el.style.backgroundColor = '#050a12'
-    } else {
-      el.style.background = 'rgba(5,8,13,.62)'
-      el.style.backdropFilter = 'blur(9px) brightness(.4) saturate(.4)'
-      el.style.webkitBackdropFilter = 'blur(9px) brightness(.4) saturate(.4)'
-    }
+    this.fogFill = st === 'black' ? '#04070c' : 'rgba(6,9,14,0.86)'
+    this.requestFog()
   }
 
   requestFog() {
@@ -373,48 +378,44 @@ export class MapController {
     this.requestFog()
   }
 
-  // Cheaply translate the fog layer to track the map during a pan, then re-anchor
-  // (full redraw) before the enlarged fog element would reveal an un-fogged edge.
-  onMapMove() {
-    const map = this.map
-    const el = this.fogEl
-    if (!map || !el || this._zooming || !this.fogAnchorLatLng) return
-    const now = map.latLngToContainerPoint(this.fogAnchorLatLng)
-    const dx = now.x - this.fogAnchorPx.x
-    const dy = now.y - this.fogAnchorPx.y
-    el.style.transform = 'translate3d(' + dx + 'px,' + dy + 'px,0)'
-    const size = map.getSize()
-    if (Math.abs(dx) > size.x * 0.1 || Math.abs(dy) > size.y * 0.1) this.requestFog()
-  }
-
   drawFog() {
     const map = this.map
-    const el = this.fogEl
-    if (!map || !el) return
-    const w = el.clientWidth
-    const h = el.clientHeight
-    if (!w || !h) return
-    // The fog element is larger than the map viewport (see App.jsx) so that
-    // translating it during a pan doesn't reveal an un-fogged edge. Offset the
-    // holes by that margin so they line up with the map.
+    const cv = this.fogCanvasEl
+    if (!map || !cv) return
     const size = map.getSize()
-    const offX = (w - size.x) / 2
-    const offY = (h - size.y) / 2
-    if (!this.fogCanvas) this.fogCanvas = document.createElement('canvas')
-    const c = this.fogCanvas
-    c.width = w
-    c.height = h
-    const ctx = c.getContext('2d')
-    ctx.fillStyle = '#fff'
+    if (!size.x || !size.y) return
+    // Cover the viewport plus padding so short pans don't reveal an un-fogged
+    // edge before the next redraw.
+    const padX = Math.round(size.x * 0.3)
+    const padY = Math.round(size.y * 0.3)
+    const w = size.x + padX * 2
+    const h = size.y + padY * 2
+    // Position the canvas in the map's layer coordinate space; Leaflet then
+    // pans/zooms it together with the tiles.
+    const topLeft = map.containerPointToLayerPoint([-padX, -padY])
+    L.DomUtil.setPosition(cv, topLeft)
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    if (cv.width !== w * dpr || cv.height !== h * dpr) {
+      cv.width = w * dpr
+      cv.height = h * dpr
+    }
+    cv.style.width = w + 'px'
+    cv.style.height = h + 'px'
+
+    const ctx = this.fogCtx
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, w, h)
+    ctx.fillStyle = this.fogFill || 'rgba(6,9,14,0.86)'
     ctx.fillRect(0, 0, w, h)
     ctx.globalCompositeOperation = 'destination-out'
     const r = this.radius()
     for (const p of this.visited) {
-      const pt = map.latLngToContainerPoint(L.latLng(p.lat, p.lng))
-      const edge = map.latLngToContainerPoint(L.latLng(p.lat, p.lng + r / this.mPerLng(p.lat)))
-      const rpx = Math.abs(edge.x - pt.x)
-      const cx = pt.x + offX
-      const cy = pt.y + offY
+      const lp = map.latLngToLayerPoint(L.latLng(p.lat, p.lng))
+      const edge = map.latLngToLayerPoint(L.latLng(p.lat, p.lng + r / this.mPerLng(p.lat)))
+      const rpx = Math.abs(edge.x - lp.x)
+      const cx = lp.x - topLeft.x
+      const cy = lp.y - topLeft.y
       if (cx < -rpx || cx > w + rpx || cy < -rpx || cy > h + rpx) continue
       const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rpx)
       g.addColorStop(0, 'rgba(0,0,0,1)')
@@ -425,15 +426,7 @@ export class MapController {
       ctx.arc(cx, cy, rpx, 0, Math.PI * 2)
       ctx.fill()
     }
-    const url = c.toDataURL()
-    el.style.webkitMaskImage = 'url(' + url + ')'
-    el.style.maskImage = 'url(' + url + ')'
-    el.style.webkitMaskSize = '100% 100%'
-    el.style.maskSize = '100% 100%'
-    // Re-anchor the pan-follow to this freshly drawn state.
-    this.fogAnchorLatLng = map.getCenter()
-    this.fogAnchorPx = map.latLngToContainerPoint(this.fogAnchorLatLng)
-    el.style.transform = 'translate3d(0,0,0)'
+    ctx.globalCompositeOperation = 'source-over'
   }
 
   // ---- settings updates (mirrors the prototype's componentDidUpdate) ----

@@ -9,7 +9,6 @@ const accentGlow = accent + '55'
 
 export default function App() {
   const mapRef = useRef(null)
-  const fogRef = useRef(null)
   const ctrlRef = useRef(null)
   const toastTimer = useRef(null)
 
@@ -39,7 +38,7 @@ export default function App() {
   // Create the controller once.
   useEffect(() => {
     if (ctrlRef.current) return
-    const ctrl = new MapController(mapRef.current, fogRef.current, FIXED, {
+    const ctrl = new MapController(mapRef.current, FIXED, {
       onStats: setStats,
       onDiscoveries: setDiscoveries,
       onStatus: setStatus,
@@ -112,24 +111,8 @@ export default function App() {
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#0a0d12', overflow: 'hidden' }}>
-      {/* MAP */}
+      {/* MAP (the fog is drawn on a canvas inside a Leaflet pane) */}
       <div ref={mapRef} style={{ position: 'absolute', inset: 0 }} />
-
-      {/* FOG overlay — larger than the viewport so it can be translated to
-          follow the map during a pan without revealing an un-fogged edge */}
-      <div
-        ref={fogRef}
-        style={{
-          position: 'absolute',
-          top: '-15%',
-          left: '-15%',
-          width: '130%',
-          height: '130%',
-          pointerEvents: 'none',
-          zIndex: 400,
-          willChange: 'transform',
-        }}
-      />
 
       {/* vignette */}
       <div
