@@ -50,14 +50,20 @@ docker compose up -d
 
 ## Vercel でデプロイ
 
-Vercel の **Dockerfile（コンテナ）サポート**を使い、この単一イメージをそのまま Vercel 上の HTTP サーバーとして動かします。用意済みのファイル:
+Vercel の **Dockerfile（コンテナ）サポート**を使い、この単一イメージをそのまま Vercel Functions 上の HTTP サーバーとして動かします。
 
-- [`Dockerfile.vercel`](Dockerfile.vercel) — `./Dockerfile` と同じ単一イメージ。サーバーは Vercel が注入する `$PORT`（デフォルト80）でリッスン。
-- [`vercel.json`](vercel.json) — `Dockerfile.vercel` を使う設定。
+- [`Dockerfile.vercel`](Dockerfile.vercel) — `./Dockerfile` と同じ単一イメージ。**root に置くと Vercel が自動検出し、全リクエストをこのコンテナへ流す rewrite を自動追加**します。サーバーはポート **80**（`$PORT`）でリッスン。
+
+> **単一サービスでは `vercel.json` を置かない**のがコツです。`services` だけ書いて `rewrites` を書かないと、どのパスもコンテナに届かず **404 NOT_FOUND** になります（最初の失敗の原因がこれ）。フロントとバックを別コンテナに分けたい場合のみ、`rewrites` の `destination` を**オブジェクト**で指定します:
+>
+> ```json
+> {
+>   "services": { "app": { "root": "./", "entrypoint": "Dockerfile.vercel" } },
+>   "rewrites": [{ "source": "/(.*)", "destination": { "service": "app" } }]
+> }
+> ```
 
 > ⚠️ **DB は Vercel では動きません**。コンテナはステートレスなので、**マネージド Postgres** を別途用意して `DATABASE_URL` で接続します（Vercel Postgres = Neon、または [Neon](https://neon.tech) / Supabase の無料枠）。
->
-> ⚠️ Vercel の Dockerfile サポートは比較的新しい機能です。`vercel.json` の記法は変わる可能性があるので、うまくいかない場合は最新の Vercel ドキュメントに合わせて調整してください（`vercel.json` を消して root の `Dockerfile.vercel` 自動検出に任せる手もあります）。エラーが出たら内容を共有してください。
 
 ### 手順
 
@@ -156,8 +162,7 @@ iOS では `http://localhost` 以外だと **Geolocation API と Service Worker 
 ```
 .
 ├── Dockerfile                  # 単一イメージ: frontend build -> Node が API+PWA を配信
-├── Dockerfile.vercel           # Vercel 用（$PORT でリッスン）
-├── vercel.json                 # Vercel コンテナデプロイ設定
+├── Dockerfile.vercel           # Vercel 用（root 自動検出・$PORT でリッスン）
 ├── .dockerignore
 ├── .vercelignore
 ├── docker-compose.yml          # app / db（2サービス）
