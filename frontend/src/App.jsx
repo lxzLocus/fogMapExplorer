@@ -59,11 +59,19 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Redraw fog on container resize (rotation / window changes).
+  // Keep Leaflet sized to its container and redraw fog on viewport changes
+  // (rotation, window resize, iOS PWA chrome/viewport settling after launch).
   useEffect(() => {
-    const onResize = () => ctrlRef.current && ctrlRef.current.requestFog()
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
+    const on = () => ctrlRef.current && ctrlRef.current.onViewportChange()
+    window.addEventListener('resize', on)
+    window.addEventListener('orientationchange', on)
+    const vv = window.visualViewport
+    if (vv) vv.addEventListener('resize', on)
+    return () => {
+      window.removeEventListener('resize', on)
+      window.removeEventListener('orientationchange', on)
+      if (vv) vv.removeEventListener('resize', on)
+    }
   }, [])
 
   const recenter = () => ctrlRef.current && ctrlRef.current.recenter()
@@ -107,10 +115,20 @@ export default function App() {
       {/* MAP */}
       <div ref={mapRef} style={{ position: 'absolute', inset: 0 }} />
 
-      {/* FOG overlay */}
+      {/* FOG overlay — larger than the viewport so it can be translated to
+          follow the map during a pan without revealing an un-fogged edge */}
       <div
         ref={fogRef}
-        style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 400 }}
+        style={{
+          position: 'absolute',
+          top: '-15%',
+          left: '-15%',
+          width: '130%',
+          height: '130%',
+          pointerEvents: 'none',
+          zIndex: 400,
+          willChange: 'transform',
+        }}
       />
 
       {/* vignette */}
