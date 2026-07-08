@@ -223,11 +223,12 @@ app.use((req, res, next) => {
 
 const port = Number(process.env.PORT ?? 3000)
 
-ensureSchema()
-  .then(() => {
-    app.listen(port, () => console.log(`[backend] listening on :${port}`))
-  })
-  .catch((e) => {
-    console.error('[db] schema init failed', e)
-    process.exit(1)
-  })
+// Open the TCP port immediately so platform startup healthchecks pass (Vercel
+// gives ~15s). The DB schema is applied in the background, retrying while the
+// database warms up; if it ultimately fails we keep the server up (so the PWA
+// still serves and /api/health reports db:false) rather than crash-looping.
+app.listen(port, () => console.log(`[backend] listening on :${port}`))
+
+ensureSchema().catch((e) => {
+  console.error('[db] schema init failed (server still running):', e.message || e)
+})
