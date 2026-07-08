@@ -8,19 +8,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // Accept the connection string under any of the common env var names that
 // managed providers inject (Vercel Postgres / Neon set POSTGRES_URL etc., not
-// necessarily DATABASE_URL). Prefer a direct (non-pooled) URL since we run a
-// long-lived pg Pool of our own.
+// necessarily DATABASE_URL). We only accept a standard `postgres://` /
+// `postgresql://` TCP URL — Prisma Accelerate URLs (`prisma+postgres://`) are
+// skipped because node-postgres cannot use them.
+const isDirectPg = (s) => /^postgres(ql)?:\/\//i.test(s || '')
 export const CONNECTION_STRING =
-  process.env.DATABASE_URL ||
-  process.env.POSTGRES_URL_NON_POOLING ||
-  process.env.POSTGRES_URL ||
-  process.env.POSTGRES_PRISMA_URL ||
-  ''
+  [
+    process.env.DATABASE_URL,
+    process.env.POSTGRES_URL_NON_POOLING,
+    process.env.POSTGRES_URL,
+    process.env.POSTGRES_PRISMA_URL,
+  ].find(isDirectPg) || ''
 
 if (!CONNECTION_STRING) {
   console.warn(
-    '[db] no connection string set (DATABASE_URL / POSTGRES_URL ...). ' +
-      'DB features will fail until one is configured.',
+    '[db] no usable postgres:// connection string found. Set DATABASE_URL (or ' +
+      'POSTGRES_URL) to a direct Postgres URL. Prisma Accelerate (prisma+postgres://) ' +
+      'is not supported by node-postgres.',
   )
 }
 
