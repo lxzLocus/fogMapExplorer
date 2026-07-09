@@ -117,6 +117,10 @@ export class MapController {
     // The CARTO dark tiles are very dark; brighten them so revealed areas read
     // as clearly "lit up" against the near-opaque fog.
     this.map = map
+    // Brighten the very dark CARTO tiles so revealed areas are clearly visible.
+    // The frosted fog dims + blurs these underneath, so fog still reads darker.
+    const tilePane = map.getPane('tilePane')
+    if (tilePane) tilePane.style.filter = 'brightness(1.55) contrast(1.05)'
     // Constrain panning to a generous box around wherever the player is (not a
     // fixed Tokyo box), so the map works at the user's real location too.
     this._applyBounds(this.pos)
@@ -129,13 +133,17 @@ export class MapController {
     const fp = map.getPane('fog')
     fp.style.zIndex = 400
     fp.style.pointerEvents = 'none'
-    const cv = document.createElement('canvas')
-    cv.style.position = 'absolute'
-    cv.style.left = '0'
-    cv.style.top = '0'
-    fp.appendChild(cv)
-    this.fogCanvasEl = cv
-    this.fogCtx = cv.getContext('2d')
+    // The fog is a div with a backdrop-filter blur ("frosted glass"), masked so
+    // the blur only covers unrevealed areas. It lives in the pane, so Leaflet's
+    // pan/zoom transforms move it with the map. A tiny offscreen canvas builds
+    // the mask (regenerated only when the view settles).
+    const el = document.createElement('div')
+    el.style.position = 'absolute'
+    el.style.left = '0'
+    el.style.top = '0'
+    fp.appendChild(el)
+    this.fogEl = el
+    this.fogMaskCanvas = document.createElement('canvas')
 
     this.buildMarker()
 
@@ -494,11 +502,19 @@ export class MapController {
 
   // ---- fog rendering ----
   applyFogStyle() {
-    // Frosted-glass look: unrevealed areas are covered by a light, milky,
-    // translucent haze (you can faintly see the map through it), which reads as
-    // clearly different from the sharp, clear revealed areas. 'black' stays dark.
+    const el = this.fogEl
+    if (!el) return
     const st = this.fogStyleV()
-    this.fogFill = st === 'black' ? 'rgba(4,6,11,0.95)' : 'rgba(202,214,232,0.6)'
+    if (st === 'black') {
+      el.style.backdropFilter = el.style.webkitBackdropFilter = 'none'
+      el.style.background = '#04070c'
+    } else {
+      // Frosted glass: blur + slightly dim the (brightened) map underneath, plus
+      // a faint cool tint. Reads as clearly hazy vs the sharp, revealed areas.
+      el.style.background = 'rgba(140,160,190,0.10)'
+      el.style.backdropFilter = el.style.webkitBackdropFilter =
+        'blur(8px) brightness(0.82) saturate(0.85)'
+    }
     this.requestFog()
   }
 
@@ -521,8 +537,8 @@ export class MapController {
 
   drawFog() {
     const map = this.map
-    const cv = this.fogCanvasEl
-    if (!map || !cv) return
+    const el = this.fogEl
+    if (!map || !el) return
     const size = map.getSize()
     if (!size.x || !size.y) return
     // Cover the viewport plus padding so short pans don't reveal an un-fogged
@@ -531,25 +547,23 @@ export class MapController {
     const padY = Math.round(size.y * 0.3)
     const w = size.x + padX * 2
     const h = size.y + padY * 2
-    // Position the canvas in the map's layer coordinate space; Leaflet then
-    // pans/zooms it together with the tiles.
+    // Position the fog div in the map's layer coordinate space; Leaflet then
+    // pans/zooms it (and its backdrop-filter) together with the tiles.
     const topLeft = map.containerPointToLayerPoint([-padX, -padY])
-    L.DomUtil.setPosition(cv, topLeft)
+    L.DomUtil.setPosition(el, topLeft)
+    el.style.width = w + 'px'
+    el.style.height = h + 'px'
 
-    // The fog is soft, so a low-res canvas is fine — and much cheaper to draw
-    // and GPU-composite while panning (perf).
+    // Build the mask: opaque where fog (blur shows), holes cut out (transparent
+    // -> the sharp map shows through). Low-res is fine (soft edges) and cheap.
+    const c = this.fogMaskCanvas
     const dpr = Math.min(window.devicePixelRatio || 1, 1.25)
-    if (cv.width !== w * dpr || cv.height !== h * dpr) {
-      cv.width = w * dpr
-      cv.height = h * dpr
-    }
-    cv.style.width = w + 'px'
-    cv.style.height = h + 'px'
-
-    const ctx = this.fogCtx
+    c.width = Math.round(w * dpr)
+    c.height = Math.round(h * dpr)
+    const ctx = c.getContext('2d')
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
-    ctx.fillStyle = this.fogFill || 'rgba(6,9,14,0.86)'
+    ctx.fillStyle = '#000'
     ctx.fillRect(0, 0, w, h)
     ctx.globalCompositeOperation = 'destination-out'
     const r = this.radius()
@@ -570,6 +584,9 @@ export class MapController {
       ctx.fill()
     }
     ctx.globalCompositeOperation = 'source-over'
+    const url = c.toDataURL()
+    el.style.webkitMaskImage = el.style.maskImage = 'url(' + url + ')'
+    el.style.webkitMaskSize = el.style.maskSize = '100% 100%'
   }
 
   // ---- settings updates (mirrors the prototype's componentDidUpdate) ----
