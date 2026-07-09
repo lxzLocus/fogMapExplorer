@@ -103,6 +103,15 @@ export default function App() {
   }
   const teleport = (lat, lng) => ctrlRef.current && ctrlRef.current.simTeleport(lat, lng)
 
+  // Tap a discovery in the log -> show it on the map.
+  const openDiscoveryOnMap = (d) => {
+    setTab('map')
+    const c = ctrlRef.current
+    if (!c) return
+    if (typeof d.lat === 'number') c.focusSpot(d.lat, d.lng, d.name)
+    else c.focusSpotByName(d.name)
+  }
+
   const doAuth = async (kind) => {
     setAuthErr('')
     setAuthBusy(true)
@@ -303,7 +312,16 @@ export default function App() {
             {discoveriesDesc.map((d, i) => (
               <div
                 key={d.name + d.t}
-                style={{ display: 'flex', gap: 14, padding: '12px 0', borderBottom: '1px solid rgba(255,255,255,.06)' }}
+                onClick={() => openDiscoveryOnMap(d)}
+                role="button"
+                style={{
+                  display: 'flex',
+                  gap: 14,
+                  padding: '12px 0',
+                  borderBottom: '1px solid rgba(255,255,255,.06)',
+                  cursor: 'pointer',
+                  alignItems: 'flex-start',
+                }}
               >
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                   <div
@@ -320,12 +338,15 @@ export default function App() {
                     <div style={{ flex: 1, width: 1, background: 'rgba(255,255,255,.08)' }} />
                   )}
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 15, color: '#eef2f8' }}>{d.name}</div>
                   <div style={{ fontSize: 11, color: '#6b7788' }}>
                     {d.time} · {d.dist}
                   </div>
                 </div>
+                <span style={{ color: accent, fontSize: 18, lineHeight: 1, alignSelf: 'center', paddingLeft: 4 }}>
+                  ›
+                </span>
               </div>
             ))}
           </div>

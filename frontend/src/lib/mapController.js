@@ -6,6 +6,10 @@ import { fetchPois } from './pois.js'
 
 const POI_DISCOVER_RANGE = 120 // meters — walk this close to "collect" a spot
 const POI_FETCH_EVERY = 700 // meters moved before fetching more nearby spots
+// Explored-% denominator: cells (250m each) that count as 100%. ~16000 cells is
+// ~1000 km², so casual exploration reads as a small, believable percentage
+// rather than hitting 50% after a short walk.
+const EXPLORE_TARGET_CELLS = 16000
 
 const DEFAULTS = {
   fogStyle: 'blur', // fixed
@@ -52,15 +56,6 @@ export class MapController {
     const dy = (b.lat - a.lat) * 111320
     const dx = (b.lng - a.lng) * this.mPerLng(a.lat)
     return Math.sqrt(dx * dx + dy * dy)
-  }
-
-  totalCells() {
-    const b = BOUNDS
-    const ny = Math.ceil(((b.latMax - b.latMin) * 111320) / CELL)
-    const nx = Math.ceil(
-      ((b.lngMax - b.lngMin) * this.mPerLng((b.latMin + b.latMax) / 2)) / CELL,
-    )
-    return nx * ny
   }
 
   addCells(p) {
@@ -303,6 +298,29 @@ export class MapController {
     if (this.map && this.pos) this.map.setView([this.pos.lat, this.pos.lng], 15)
   }
 
+  // Center the map on a spot (from the discovery log) and label it.
+  focusSpot(lat, lng, name) {
+    if (!this.map || typeof lat !== 'number') return
+    this.follow = false // stay on the spot, don't snap back to the player
+    this.map.setView([lat, lng], Math.max(this.map.getZoom() || 15, 16))
+    this.updateBlips()
+    if (name) {
+      L.popup({ closeButton: true, offset: [0, -8], autoPan: false })
+        .setLatLng([lat, lng])
+        .setContent(
+          '<div style="font-family:\'Noto Sans JP\',sans-serif;font-weight:700;font-size:13px;">' +
+            name +
+            '</div>',
+        )
+        .openOn(this.map)
+    }
+  }
+  // Older log entries have no coords — look the spot up by name if we know it.
+  focusSpotByName(name) {
+    const s = this.stops.get(name)
+    if (s) this.focusSpot(s.lat, s.lng, name)
+  }
+
   // Constrain panning to a generous box around the player so you can explore
   // locally but not wander off into empty map. Re-centred as the player moves.
   _applyBounds(pos) {
@@ -396,6 +414,8 @@ export class MapController {
           {
             name: s.name,
             kind: s.kind,
+            lat: s.lat,
+            lng: s.lng,
             time: now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0'),
             dist: (this.totalDist / 1000).toFixed(1) + ' km 地点',
             t: now.getTime(),
@@ -484,8 +504,7 @@ export class MapController {
 
   // ---- stats ----
   refreshStats() {
-    const total = this.totalCells()
-    const pct = Math.min(100, (this.cells.size / total) * 100)
+    const pct = Math.min(100, (this.cells.size / EXPLORE_TARGET_CELLS) * 100)
     const areaKm2 = (this.cells.size * CELL * CELL) / 1e6
     const xp = this.cells.size
     const level = Math.floor(Math.sqrt(xp / 30)) + 1
