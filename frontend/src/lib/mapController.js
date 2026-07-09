@@ -141,6 +141,10 @@ export class MapController {
     // it with the map (perfect tracking — no lag). Drawn directly (no
     // backdrop-filter, which cannot follow a pan without lagging).
     const cv = document.createElement('canvas')
+    // Leaflet's zoom-animated class gives transform-origin:0 0 (so our zoom
+    // scaling is anchored correctly) and the same smooth transition the tiles
+    // use during a zoom — so the fog scales in lock-step with the map.
+    cv.className = 'leaflet-zoom-animated'
     cv.style.position = 'absolute'
     cv.style.left = '0'
     cv.style.top = '0'
