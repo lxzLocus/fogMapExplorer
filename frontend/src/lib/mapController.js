@@ -100,12 +100,6 @@ export class MapController {
     this._lastFetch = null
     this._fetchingPois = false
 
-    // Keep the player inside the play area — no panning out into empty map.
-    const M = 0.2 // ~22km margin around the scoring bounds (greater Tokyo)
-    const maxBounds = [
-      [BOUNDS.latMin - M, BOUNDS.lngMin - M],
-      [BOUNDS.latMax + M, BOUNDS.lngMax + M],
-    ]
     const map = L.map(this.container, {
       center: [this.pos.lat, this.pos.lng],
       zoom: 15,
@@ -113,7 +107,6 @@ export class MapController {
       maxZoom: 19,
       zoomControl: false,
       attributionControl: true,
-      maxBounds,
       maxBoundsViscosity: 1.0,
     })
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
@@ -125,6 +118,9 @@ export class MapController {
     const tilePane = map.getPane('tilePane')
     if (tilePane) tilePane.style.filter = 'brightness(1.55) contrast(1.08)'
     this.map = map
+    // Constrain panning to a generous box around wherever the player is (not a
+    // fixed Tokyo box), so the map works at the user's real location too.
+    this._applyBounds(this.pos)
 
     // Fog lives in its own Leaflet pane as a <canvas>. Because it's a child of
     // the map pane, Leaflet's pan/zoom transforms apply to it automatically, so
@@ -150,7 +146,9 @@ export class MapController {
     // Redraw as the view moves (cheap: direct canvas draw, no toDataURL). Skip
     // during zoom animation — the pane transform scales the fog for us; we
     // recompute once on zoomend.
-    map.on('move', () => { if (!this._zooming) this.requestFog() })
+    // Fog lives in the map pane, so Leaflet's pan/zoom transforms move it for
+    // us — redraw only when the view settles, not on every frame (that was the
+    // scroll lag). zoomend redraw is handled by the zoom handler above.
     map.on('moveend viewreset resize', () => this.requestFog())
     // Reveal/collect spot markers for whatever is now in view.
     map.on('moveend', () => this.updateBlips())
@@ -214,6 +212,10 @@ export class MapController {
     if (moved > 0.5 && moved < 150) this.totalDist += moved
 
     this.pos = newPos
+    // Keep the allowed pan area centred on the player as they travel.
+    if (!this._boundsCenter || this.distM(this._boundsCenter, this.pos) > 20000) {
+      this._applyBounds(this.pos)
+    }
     if (heading != null && !Number.isNaN(heading)) this.heading = heading
     this.marker.setLatLng([newPos.lat, newPos.lng])
     if (this.hdEl && heading != null) {
@@ -284,6 +286,18 @@ export class MapController {
   recenter() {
     this.follow = true
     if (this.map && this.pos) this.map.setView([this.pos.lat, this.pos.lng], 15)
+  }
+
+  // Constrain panning to a generous box around the player so you can explore
+  // locally but not wander off into empty map. Re-centred as the player moves.
+  _applyBounds(pos) {
+    if (!this.map || !pos) return
+    const d = 0.5 // ~55km half-box
+    this._boundsCenter = { ...pos }
+    this.map.setMaxBounds([
+      [pos.lat - d, pos.lng - d],
+      [pos.lat + d, pos.lng + d],
+    ])
   }
 
   // ---- spot discovery (PokéStop-style) ----
@@ -466,8 +480,8 @@ export class MapController {
     if (!size.x || !size.y) return
     // Cover the viewport plus padding so short pans don't reveal an un-fogged
     // edge before the next redraw.
-    const padX = Math.round(size.x * 0.3)
-    const padY = Math.round(size.y * 0.3)
+    const padX = Math.round(size.x * 0.4)
+    const padY = Math.round(size.y * 0.4)
     const w = size.x + padX * 2
     const h = size.y + padY * 2
     // Position the canvas in the map's layer coordinate space; Leaflet then
