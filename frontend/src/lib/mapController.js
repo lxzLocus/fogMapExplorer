@@ -133,17 +133,16 @@ export class MapController {
     const fp = map.getPane('fog')
     fp.style.zIndex = 400
     fp.style.pointerEvents = 'none'
-    // The fog is a div with a backdrop-filter blur ("frosted glass"), masked so
-    // the blur only covers unrevealed areas. It lives in the pane, so Leaflet's
-    // pan/zoom transforms move it with the map. A tiny offscreen canvas builds
-    // the mask (regenerated only when the view settles).
-    const el = document.createElement('div')
-    el.style.position = 'absolute'
-    el.style.left = '0'
-    el.style.top = '0'
-    fp.appendChild(el)
-    this.fogEl = el
-    this.fogMaskCanvas = document.createElement('canvas')
+    // The fog is a <canvas> in this pane, so Leaflet's pan/zoom transforms move
+    // it with the map (perfect tracking — no lag). Drawn directly (no
+    // backdrop-filter, which cannot follow a pan without lagging).
+    const cv = document.createElement('canvas')
+    cv.style.position = 'absolute'
+    cv.style.left = '0'
+    cv.style.top = '0'
+    fp.appendChild(cv)
+    this.fogCanvasEl = cv
+    this.fogCtx = cv.getContext('2d')
 
     this.buildMarker()
 
@@ -360,7 +359,7 @@ export class MapController {
     this._lastFetch = { ...this.pos }
     this._fetchingPois = true
     try {
-      const pois = await fetchPois(this.pos.lat, this.pos.lng, 1200)
+      const pois = await fetchPois(this.pos.lat, this.pos.lng, 1500)
       let added = 0
       for (const p of pois) {
         if (!this.stops.has(p.name)) {
@@ -408,12 +407,6 @@ export class MapController {
     }
   }
 
-  // True if the spot sits within the reveal radius of the player right now
-  // (keeps the number of blinking "?" markers bounded to nearby spots).
-  nearPlayer(s) {
-    return this.pos && this.distM(this.pos, s) < this.radius()
-  }
-
   blipIcon(lm, discovered) {
     if (discovered) {
       return L.divIcon({
@@ -426,14 +419,16 @@ export class MapController {
           '</svg>',
       })
     }
+    // Undiscovered = a small static dot in the spot's colour (no animation, so
+    // many can be shown cheaply). It turns into the full icon once collected.
+    const c = lm.hue || '#9fb2c8'
     return L.divIcon({
       className: '',
-      iconSize: [20, 20],
-      iconAnchor: [10, 10],
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
       html:
-        '<div style="animation:fx-blink 1.6s ease infinite;filter:drop-shadow(0 1px 2px rgba(0,0,0,.9));' +
-        'font-family:Oswald,sans-serif;font-weight:700;font-size:17px;color:#fff;text-shadow:0 0 2px #0a0d12,-1px 0 #0a0d12,1px 0 #0a0d12,0 -1px #0a0d12,0 1px #0a0d12;' +
-        'width:20px;height:20px;display:flex;align-items:center;justify-content:center;">?</div>',
+        '<div style="width:11px;height:11px;border-radius:50%;background:' + c + ';opacity:.8;' +
+        'border:1.5px solid #0a0d12;box-shadow:0 1px 2px rgba(0,0,0,.85);"></div>',
     })
   }
 
@@ -441,20 +436,20 @@ export class MapController {
     if (!this.map) return
     // Only render markers for spots in (or near) the current view; discovered
     // spots always show, undiscovered ones only when near the player.
-    const bounds = this.map.getBounds().pad(0.25)
+    const bounds = this.map.getBounds().pad(0.15)
     const discovered = []
     const hints = []
     for (const s of this.stops.values()) {
       if (!bounds.contains([s.lat, s.lng])) continue
       if (this.isDiscovered(s.name)) discovered.push(s)
-      else if (this.nearPlayer(s)) hints.push(s)
+      else hints.push(s) // any undiscovered spot in view shows as a dot
     }
-    // Cap the blinking "?" hints to the nearest handful — fewer animated markers
-    // keeps panning smooth in dense areas.
+    // Cap the undiscovered dots to the nearest 60 (bounds marker count in dense
+    // areas); discovered spots always show.
     if (this.pos) hints.sort((a, b) => this.distM(this.pos, a) - this.distM(this.pos, b))
     const want = new Map() // name -> 'found' | 'hint'
     for (const s of discovered) want.set(s.name, 'found')
-    for (const s of hints.slice(0, 12)) want.set(s.name, 'hint')
+    for (const s of hints.slice(0, 60)) want.set(s.name, 'hint')
     // remove markers no longer wanted (or whose state changed)
     for (const name in this.lmMarkers) {
       if (want.get(name) !== this.lmMarkers[name].kind) {
@@ -502,19 +497,11 @@ export class MapController {
 
   // ---- fog rendering ----
   applyFogStyle() {
-    const el = this.fogEl
-    if (!el) return
+    // Semi-transparent dark veil: unrevealed areas are dimmed (the bright map
+    // shows through faintly) yet clearly distinct from the sharp, bright
+    // revealed areas. Drawn on a canvas in the pane, so it tracks perfectly.
     const st = this.fogStyleV()
-    if (st === 'black') {
-      el.style.backdropFilter = el.style.webkitBackdropFilter = 'none'
-      el.style.background = '#04070c'
-    } else {
-      // Frosted glass, dark: blur the map underneath and darken it heavily so
-      // unrevealed areas are nearly black against the bright revealed map.
-      el.style.background = 'rgba(3,5,9,0.55)'
-      el.style.backdropFilter = el.style.webkitBackdropFilter =
-        'blur(9px) brightness(0.52) saturate(0.8)'
-    }
+    this.fogFill = st === 'black' ? '#04070c' : 'rgba(5,7,12,0.58)'
     this.requestFog()
   }
 
@@ -537,8 +524,8 @@ export class MapController {
 
   drawFog() {
     const map = this.map
-    const el = this.fogEl
-    if (!map || !el) return
+    const cv = this.fogCanvasEl
+    if (!map || !cv) return
     const size = map.getSize()
     if (!size.x || !size.y) return
     // Cover the viewport plus padding so short pans don't reveal an un-fogged
@@ -547,24 +534,23 @@ export class MapController {
     const padY = Math.round(size.y * 0.3)
     const w = size.x + padX * 2
     const h = size.y + padY * 2
-    // Position the fog div in the map's layer coordinate space; Leaflet then
-    // pans/zooms it (and its backdrop-filter) together with the tiles.
+    // Position the canvas in the map's layer coordinate space; Leaflet then
+    // pans/zooms it together with the tiles.
     const topLeft = map.containerPointToLayerPoint([-padX, -padY])
-    L.DomUtil.setPosition(el, topLeft)
-    el.style.width = w + 'px'
-    el.style.height = h + 'px'
+    L.DomUtil.setPosition(cv, topLeft)
 
-    // Build the mask: opaque where fog (blur shows), holes cut out (transparent
-    // -> the sharp map shows through). Low-res is fine (soft edges) and cheap.
-    const c = this.fogMaskCanvas
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.25)
-    c.width = Math.round(w * dpr)
-    c.height = Math.round(h * dpr)
-    const ctx = c.getContext('2d')
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5)
+    if (cv.width !== Math.round(w * dpr)) cv.width = Math.round(w * dpr)
+    if (cv.height !== Math.round(h * dpr)) cv.height = Math.round(h * dpr)
+    cv.style.width = w + 'px'
+    cv.style.height = h + 'px'
+
+    const ctx = this.fogCtx
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
-    ctx.fillStyle = '#000'
+    ctx.fillStyle = this.fogFill || 'rgba(5,7,12,0.58)'
     ctx.fillRect(0, 0, w, h)
+    // Cut clear holes where the player has been.
     ctx.globalCompositeOperation = 'destination-out'
     const r = this.radius()
     for (const p of this.visited) {
@@ -584,9 +570,6 @@ export class MapController {
       ctx.fill()
     }
     ctx.globalCompositeOperation = 'source-over'
-    const url = c.toDataURL()
-    el.style.webkitMaskImage = el.style.maskImage = 'url(' + url + ')'
-    el.style.webkitMaskSize = el.style.maskSize = '100% 100%'
   }
 
   // ---- settings updates (mirrors the prototype's componentDidUpdate) ----
