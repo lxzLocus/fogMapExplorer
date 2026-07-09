@@ -2,6 +2,10 @@ import L from 'leaflet'
 import { LANDMARKS, BOUNDS, CELL, DEFAULT_POS, blipSvg } from './landmarks.js'
 import { loadLocal, saveLocal } from './storage.js'
 import { fetchRemoteState, pushRemoteState } from './api.js'
+import { fetchPois } from './pois.js'
+
+const POI_DISCOVER_RANGE = 120 // meters — walk this close to "collect" a spot
+const POI_FETCH_EVERY = 700 // meters moved before fetching more nearby spots
 
 const DEFAULTS = {
   fogStyle: 'blur', // fixed
@@ -88,6 +92,14 @@ export class MapController {
     this.cells = new Set(local.cells || [])
     if (!local.cells) this.visited.forEach((p) => this.addCells(p))
 
+    // Discoverable spots: the curated landmarks (always available) plus real
+    // OSM POIs fetched around the player as they move. Keyed by name.
+    this.stops = new Map()
+    for (const lm of LANDMARKS) this.stops.set(lm.name, lm)
+    this.discoveredNames = new Set(this.discoveries.map((d) => d.name))
+    this._lastFetch = null
+    this._fetchingPois = false
+
     // Keep the player inside the play area — no panning out into empty map.
     const M = 0.2 // ~22km margin around the scoring bounds (greater Tokyo)
     const maxBounds = [
@@ -140,6 +152,8 @@ export class MapController {
     // recompute once on zoomend.
     map.on('move', () => { if (!this._zooming) this.requestFog() })
     map.on('moveend viewreset resize', () => this.requestFog())
+    // Reveal/collect spot markers for whatever is now in view.
+    map.on('moveend', () => this.updateBlips())
     // iOS PWA / rotation: the viewport can settle after launch, leaving Leaflet
     // sized smaller than its container (a gap at the bottom). Re-sync a couple
     // of times shortly after mount.
@@ -158,7 +172,8 @@ export class MapController {
     const remote = await fetchRemoteState()
     if (remote && !this.destroyed) this.mergeRemote(remote)
 
-    // Start real GPS tracking.
+    // Seed nearby real-world spots and start real GPS tracking.
+    this.maybeFetchPois()
     this.startGeo()
   }
 
@@ -207,11 +222,14 @@ export class MapController {
     }
     if (this.follow) this.map.panTo([newPos.lat, newPos.lng], { animate: false })
 
+    // Collect any spots we're now next to, and top up spots as we move.
+    this.checkStops()
+    this.maybeFetchPois()
+
     const last = this.visited[this.visited.length - 1]
     if (!last || this.distM(last, this.pos) > Math.max(80, this.radius() * 0.12)) {
       this.visited.push({ ...this.pos })
       this.addCells(this.pos)
-      this.checkLandmarks()
       this.updateBlips()
       this.refreshStats()
       this.saveDebounced()
@@ -268,13 +286,70 @@ export class MapController {
     if (this.map && this.pos) this.map.setView([this.pos.lat, this.pos.lng], 15)
   }
 
-  // ---- landmark blips ----
-  inRevealed(lm) {
-    const r = this.radius()
-    for (let i = this.visited.length - 1; i >= 0; i--) {
-      if (this.distM(this.visited[i], lm) < r) return true
+  // ---- spot discovery (PokéStop-style) ----
+  isDiscovered(name) {
+    return this.discoveredNames.has(name)
+  }
+
+  // Fetch more real-world spots once the player has moved far enough.
+  async maybeFetchPois() {
+    if (this._fetchingPois || !this.pos) return
+    if (this._lastFetch && this.distM(this._lastFetch, this.pos) < POI_FETCH_EVERY) return
+    this._lastFetch = { ...this.pos }
+    this._fetchingPois = true
+    try {
+      const pois = await fetchPois(this.pos.lat, this.pos.lng, 1200)
+      let added = 0
+      for (const p of pois) {
+        if (!this.stops.has(p.name)) {
+          this.stops.set(p.name, p)
+          added++
+        }
+      }
+      if (added && !this.destroyed) {
+        this.checkStops()
+        this.updateBlips()
+      }
+    } catch {
+      /* offline / rate-limited — keep the landmarks */
     }
-    return false
+    this._fetchingPois = false
+  }
+
+  // Discover (collect) any known spot the player is standing next to.
+  checkStops() {
+    let found = false
+    for (const s of this.stops.values()) {
+      if (this.isDiscovered(s.name)) continue
+      if (this.distM(this.pos, s) < POI_DISCOVER_RANGE) {
+        const now = new Date()
+        this.discoveries = [
+          ...this.discoveries,
+          {
+            name: s.name,
+            kind: s.kind,
+            time: now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0'),
+            dist: (this.totalDist / 1000).toFixed(1) + ' km 地点',
+            t: now.getTime(),
+          },
+        ]
+        this.discoveredNames.add(s.name)
+        this.emit('onToast', s.name)
+        found = true
+      }
+    }
+    if (found) {
+      this.emitDiscoveries()
+      this.refreshStats()
+      this.saveDebounced()
+      this.syncDebounced()
+    }
+  }
+
+  // True if the spot sits within the reveal radius of the player right now
+  // (keeps the number of blinking "?" markers bounded to nearby spots).
+  nearPlayer(s) {
+    return this.pos && this.distM(this.pos, s) < this.radius()
   }
 
   blipIcon(lm, discovered) {
@@ -302,46 +377,37 @@ export class MapController {
 
   updateBlips() {
     if (!this.map) return
-    for (const lm of LANDMARKS) {
-      const discovered = this.discoveries.some((d) => d.name === lm.name)
-      const revealed = discovered || this.inRevealed(lm)
-      const cur = this.lmMarkers[lm.name]
-      const want = revealed ? (discovered ? 'found' : 'hint') : 'none'
-      if (cur && cur.kind === want) continue
-      if (cur) this.map.removeLayer(cur.marker)
-      if (want === 'none') {
-        delete this.lmMarkers[lm.name]
-        continue
+    // Only render markers for spots in (or near) the current view; discovered
+    // spots always show, undiscovered ones only when near the player.
+    const bounds = this.map.getBounds().pad(0.25)
+    const want = new Map() // name -> 'found' | 'hint'
+    for (const s of this.stops.values()) {
+      if (!bounds.contains([s.lat, s.lng])) continue
+      if (this.isDiscovered(s.name)) want.set(s.name, 'found')
+      else if (this.nearPlayer(s)) want.set(s.name, 'hint')
+    }
+    // remove markers no longer wanted (or whose state changed)
+    for (const name in this.lmMarkers) {
+      if (want.get(name) !== this.lmMarkers[name].kind) {
+        this.map.removeLayer(this.lmMarkers[name].marker)
+        delete this.lmMarkers[name]
       }
-      const marker = L.marker([lm.lat, lm.lng], {
-        icon: this.blipIcon(lm, want === 'found'),
+    }
+    // add missing markers
+    for (const [name, state] of want) {
+      if (this.lmMarkers[name]) continue
+      const s = this.stops.get(name)
+      const marker = L.marker([s.lat, s.lng], {
+        icon: this.blipIcon(s, state === 'found'),
         zIndexOffset: 500,
       }).addTo(this.map)
       marker.bindPopup(
         '<div style="font-family:\'Noto Sans JP\',sans-serif;font-weight:700;font-size:13px;">' +
-          (want === 'found' ? lm.name : '未発見のスポット') +
+          (state === 'found' ? s.name : '未発見のスポット') +
           '</div>',
         { closeButton: false, offset: [0, -26] },
       )
-      this.lmMarkers[lm.name] = { marker, kind: want }
-    }
-  }
-
-  checkLandmarks() {
-    for (const lm of LANDMARKS) {
-      if (this.discoveries.some((d) => d.name === lm.name)) continue
-      if (this.distM(this.pos, lm) < Math.min(this.radius(), 600)) {
-        const now = new Date()
-        const entry = {
-          name: lm.name,
-          time: now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0'),
-          dist: (this.totalDist / 1000).toFixed(1) + ' km 地点',
-          t: now.getTime(),
-        }
-        this.discoveries = [...this.discoveries, entry]
-        this.emitDiscoveries()
-        this.emit('onToast', lm.name)
-      }
+      this.lmMarkers[name] = { marker, kind: state }
     }
   }
 
@@ -362,7 +428,6 @@ export class MapController {
       xpPct: Math.round(((xp - cur) / (next - cur)) * 100),
       xpToNext: next - xp + ' セル',
       discoveryCount: this.discoveries.length,
-      landmarkTotal: LANDMARKS.length,
     })
   }
 
@@ -470,6 +535,7 @@ export class MapController {
     this.visited.forEach((p) => this.addCells(p))
     this.totalDist = 0
     this.discoveries = []
+    this.discoveredNames = new Set()
     this.updateBlips()
     this.refreshStats()
     this.emitDiscoveries()
@@ -517,6 +583,7 @@ export class MapController {
       if (!ex || (d.t || 0) < (ex.t || 0)) byName.set(d.name, d)
     }
     this.discoveries = [...byName.values()]
+    this.discoveredNames = new Set(this.discoveries.map((d) => d.name))
 
     this.visited = [...(remote.visited || []), ...this.visited].slice(-2000)
     this.totalDist = Math.max(this.totalDist, remote.totalDist || 0)
