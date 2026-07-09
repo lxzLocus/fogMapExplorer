@@ -119,12 +119,10 @@ export class MapController {
     this.map = map
     // Brighten the very dark CARTO tiles so revealed areas are clearly visible.
     // The frosted fog dims + blurs these underneath, so fog still reads darker.
-    // Brightness for visibility + a soft blur for the "frosted glass" feel.
-    // Blurring the tiles (rather than a backdrop-filter overlay) means the blur
-    // is baked into the map and tracks pan/zoom natively — no lag. The dark fog
-    // veil on top keeps unrevealed areas clearly darker.
+    // Brighten the very dark CARTO tiles so revealed areas are clear and sharp.
+    // (No blur — the fog is a dark veil; revealed areas stay crisp.)
     const tilePane = map.getPane('tilePane')
-    if (tilePane) tilePane.style.filter = 'brightness(2) contrast(1.05) blur(4px)'
+    if (tilePane) tilePane.style.filter = 'brightness(2) contrast(1.05)'
     // Constrain panning to a generous box around wherever the player is (not a
     // fixed Tokyo box), so the map works at the user's real location too.
     this._applyBounds(this.pos)
