@@ -119,8 +119,12 @@ export class MapController {
     this.map = map
     // Brighten the very dark CARTO tiles so revealed areas are clearly visible.
     // The frosted fog dims + blurs these underneath, so fog still reads darker.
+    // Brightness for visibility + a soft blur for the "frosted glass" feel.
+    // Blurring the tiles (rather than a backdrop-filter overlay) means the blur
+    // is baked into the map and tracks pan/zoom natively — no lag. The dark fog
+    // veil on top keeps unrevealed areas clearly darker.
     const tilePane = map.getPane('tilePane')
-    if (tilePane) tilePane.style.filter = 'brightness(2) contrast(1.05)'
+    if (tilePane) tilePane.style.filter = 'brightness(2) contrast(1.05) blur(4px)'
     // Constrain panning to a generous box around wherever the player is (not a
     // fixed Tokyo box), so the map works at the user's real location too.
     this._applyBounds(this.pos)
@@ -147,14 +151,13 @@ export class MapController {
     this.buildMarker()
 
     map.on('dragstart', () => { this.follow = false })
-    map.on('zoomstart', () => { this._zooming = true })
-    map.on('zoomend', () => { this._zooming = false; this.requestFog() })
-    // Redraw as the view moves (cheap: direct canvas draw, no toDataURL). Skip
-    // during zoom animation — the pane transform scales the fog for us; we
-    // recompute once on zoomend.
-    // Fog lives in the map pane, so Leaflet's pan/zoom transforms move it for
-    // us — redraw only when the view settles, not on every frame (that was the
-    // scroll lag). zoomend redraw is handled by the zoom handler above.
+    // Fog lives in the map pane: Leaflet's pan transform moves it with the map,
+    // so we only redraw when the view settles (not per frame — that was the
+    // scroll lag). Zoom is different: panes don't auto-scale during a zoom
+    // animation, so we scale the fog ourselves via 'zoomanim' (like Leaflet's
+    // own image/vector layers) to avoid the "zoom updates late" lag.
+    map.on('zoomanim', (e) => this._onFogZoomAnim(e))
+    map.on('zoomend', () => this.requestFog())
     map.on('moveend viewreset resize', () => this.requestFog())
     // Reveal/collect spot markers for whatever is now in view.
     map.on('moveend', () => this.updateBlips())
@@ -514,6 +517,16 @@ export class MapController {
     })
   }
 
+  // Scale/translate the fog canvas to match a zoom animation, so it tracks the
+  // zoom smoothly instead of snapping late on zoomend (mirrors L.ImageOverlay).
+  _onFogZoomAnim(e) {
+    const cv = this.fogCanvasEl
+    if (!cv || !this._fogNW || !this.map) return
+    const scale = this.map.getZoomScale(e.zoom)
+    const offset = this.map._latLngToNewLayerPoint(this._fogNW, e.zoom, e.center)
+    L.DomUtil.setTransform(cv, offset, scale)
+  }
+
   // Keep Leaflet's internal size in sync with its container (fixes the iOS PWA
   // bottom gap where the map renders shorter than the screen).
   onViewportChange() {
@@ -538,6 +551,8 @@ export class MapController {
     // pans/zooms it together with the tiles.
     const topLeft = map.containerPointToLayerPoint([-padX, -padY])
     L.DomUtil.setPosition(cv, topLeft)
+    // Anchor for zoom-animation scaling (see _onFogZoomAnim).
+    this._fogNW = map.layerPointToLatLng(topLeft)
 
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5)
     if (cv.width !== Math.round(w * dpr)) cv.width = Math.round(w * dpr)
