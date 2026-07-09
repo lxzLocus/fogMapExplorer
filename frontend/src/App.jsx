@@ -337,7 +337,7 @@ export default function App() {
         <div style={{ ...panel, paddingTop: `calc(${SAFE_TOP} + 74px)` }}>
           <div style={panelHeading}>EXPLORATION STATS — 統計</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <StatCard label="探索率(都心部)" value={stats.exploredPct} unit="%" big />
+            <StatCard label="探索率" value={stats.exploredPct} unit="%" big />
             <StatCard label="解放面積" value={stats.areaKm} unit=" km²" />
             <StatCard label="発見数" value={stats.discoveryCount} unit=" 箇所" />
             <StatCard label="総移動距離" value={stats.distKm} unit=" km" />

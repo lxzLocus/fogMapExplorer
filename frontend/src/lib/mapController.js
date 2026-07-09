@@ -70,9 +70,11 @@ export class MapController {
     const dLng = r / this.mPerLng(p.lat)
     const stepLat = CELL / 111320
     const stepLng = CELL / this.mPerLng(p.lat)
+    // Global 250m grid (indexed from the BOUNDS origin, but not restricted to
+    // it) so exploration accrues anywhere — Tokyo, Kansai, or the user's real
+    // location.
     for (let la = p.lat - dLat; la <= p.lat + dLat; la += stepLat) {
       for (let lo = p.lng - dLng; lo <= p.lng + dLng; lo += stepLng) {
-        if (la < b.latMin || la > b.latMax || lo < b.lngMin || lo > b.lngMax) continue
         if (this.distM(p, { lat: la, lng: lo }) > r) continue
         const key =
           Math.round(((la - b.latMin) * 111320) / CELL) +
@@ -506,7 +508,7 @@ export class MapController {
     // shows through faintly) yet clearly distinct from the sharp, bright
     // revealed areas. Drawn on a canvas in the pane, so it tracks perfectly.
     const st = this.fogStyleV()
-    this.fogFill = st === 'black' ? '#04070c' : 'rgba(4,6,11,0.85)'
+    this.fogFill = st === 'black' ? '#04070c' : 'rgba(4,6,11,0.95)'
     this.requestFog()
   }
 
@@ -565,7 +567,7 @@ export class MapController {
     const ctx = this.fogCtx
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
-    ctx.fillStyle = this.fogFill || 'rgba(4,6,11,0.85)'
+    ctx.fillStyle = this.fogFill || 'rgba(4,6,11,0.95)'
     ctx.fillRect(0, 0, w, h)
     // Cut clear holes where the player has been.
     ctx.globalCompositeOperation = 'destination-out'
