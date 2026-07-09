@@ -511,9 +511,9 @@ export class MapController {
     } else {
       // Frosted glass, dark: blur the map underneath and darken it heavily so
       // unrevealed areas are nearly black against the bright revealed map.
-      el.style.background = 'rgba(3,5,9,0.7)'
+      el.style.background = 'rgba(3,5,9,0.55)'
       el.style.backdropFilter = el.style.webkitBackdropFilter =
-        'blur(9px) brightness(0.4) saturate(0.8)'
+        'blur(9px) brightness(0.52) saturate(0.8)'
     }
     this.requestFog()
   }
