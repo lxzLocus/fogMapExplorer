@@ -1,11 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 import { MapController } from './lib/mapController.js'
 import { register, login, logout, getUser } from './lib/auth.js'
+import Joystick from './Joystick.jsx'
 
 // Fixed appearance/behaviour (product decision): 500 m reveal, blur fog, green.
 const FIXED = { fogStyle: 'blur', revealRadius: 500, accent: '#7CFC9B' }
 const accent = FIXED.accent
 const accentGlow = accent + '55'
+
+// Dev GPS emulation: on in `vite dev`, or on any build via ?sim=1
+const SIM =
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) ||
+  new URLSearchParams(window.location.search).has('sim')
+const SIM_MAX_SPEED = 22 // m/s at full stick
+const CITIES = [
+  { name: '東京', lat: 35.6595, lng: 139.7005 },
+  { name: '横浜', lat: 35.4657, lng: 139.6222 },
+  { name: '名古屋', lat: 35.1706, lng: 136.8816 },
+  { name: '京都', lat: 35.0116, lng: 135.7681 },
+  { name: '大阪', lat: 34.7025, lng: 135.4959 },
+  { name: '神戸', lat: 34.6901, lng: 135.1955 },
+]
 
 export default function App() {
   const mapRef = useRef(null)
@@ -37,16 +52,21 @@ export default function App() {
   // Create the controller once.
   useEffect(() => {
     if (ctrlRef.current) return
-    const ctrl = new MapController(mapRef.current, FIXED, {
-      onStats: setStats,
-      onDiscoveries: setDiscoveries,
-      onStatus: setStatus,
-      onToast: (name) => {
-        setToast(name)
-        clearTimeout(toastTimer.current)
-        toastTimer.current = setTimeout(() => setToast(null), 3500)
+    const ctrl = new MapController(
+      mapRef.current,
+      FIXED,
+      {
+        onStats: setStats,
+        onDiscoveries: setDiscoveries,
+        onStatus: setStatus,
+        onToast: (name) => {
+          setToast(name)
+          clearTimeout(toastTimer.current)
+          toastTimer.current = setTimeout(() => setToast(null), 3500)
+        },
       },
-    })
+      { sim: SIM },
+    )
     ctrlRef.current = ctrl
     ctrl.init()
     return () => {
@@ -73,6 +93,15 @@ export default function App() {
   }, [])
 
   const recenter = () => ctrlRef.current && ctrlRef.current.recenter()
+
+  // dev GPS emulation
+  const onJoy = (v) => {
+    const c = ctrlRef.current
+    if (!c) return
+    if (!v) c.setSimVector(0, 0)
+    else c.setSimVector(v.heading, v.speed * SIM_MAX_SPEED)
+  }
+  const teleport = (lat, lng) => ctrlRef.current && ctrlRef.current.simTeleport(lat, lng)
 
   const doAuth = async (kind) => {
     setAuthErr('')
@@ -227,6 +256,34 @@ export default function App() {
             >
               {status}
             </div>
+          </div>
+        </>
+      )}
+
+      {/* dev GPS emulation controls */}
+      {SIM && tab === 'map' && (
+        <>
+          <div
+            style={{
+              position: 'absolute',
+              left: 14,
+              right: 14,
+              bottom: `calc(${SAFE_BOTTOM} + 162px)`,
+              zIndex: 520,
+              display: 'flex',
+              gap: 6,
+              overflowX: 'auto',
+            }}
+          >
+            <span style={{ ...simChip, borderColor: accent, color: accent }}>SIM</span>
+            {CITIES.map((c) => (
+              <button key={c.name} onClick={() => teleport(c.lat, c.lng)} style={simChip}>
+                {c.name}
+              </button>
+            ))}
+          </div>
+          <div style={{ position: 'absolute', left: 14, bottom: `calc(${SAFE_BOTTOM} + 92px)`, zIndex: 520 }}>
+            <Joystick onVector={onJoy} accent={accent} />
           </div>
         </>
       )}
@@ -593,4 +650,18 @@ const closeBtn = {
   alignItems: 'center',
   justifyContent: 'center',
   flexShrink: 0,
+}
+const simChip = {
+  flex: '0 0 auto',
+  padding: '6px 12px',
+  borderRadius: 999,
+  border: '1px solid rgba(255,255,255,.16)',
+  background: 'rgba(8,11,16,.8)',
+  backdropFilter: 'blur(6px)',
+  WebkitBackdropFilter: 'blur(6px)',
+  color: '#c8d2e0',
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
 }

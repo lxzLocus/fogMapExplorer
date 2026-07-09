@@ -21,10 +21,11 @@ const DEFAULTS = {
  *   onStats(stats), onDiscoveries(list), onToast(name), onStatus(text)
  */
 export class MapController {
-  constructor(container, settings, callbacks) {
+  constructor(container, settings, callbacks, opts = {}) {
     this.container = container
     this.settings = { ...DEFAULTS, ...settings }
     this.cb = callbacks || {}
+    this.sim = !!opts.sim // dev GPS emulation (joystick / click-to-teleport)
 
     this.pos = { ...DEFAULT_POS }
     this.visited = [] // {lat,lng}[]
@@ -115,8 +116,6 @@ export class MapController {
     }).addTo(map)
     // The CARTO dark tiles are very dark; brighten them so revealed areas read
     // as clearly "lit up" against the near-opaque fog.
-    const tilePane = map.getPane('tilePane')
-    if (tilePane) tilePane.style.filter = 'brightness(1.55) contrast(1.08)'
     this.map = map
     // Constrain panning to a generous box around wherever the player is (not a
     // fixed Tokyo box), so the map works at the user's real location too.
@@ -170,9 +169,10 @@ export class MapController {
     const remote = await fetchRemoteState()
     if (remote && !this.destroyed) this.mergeRemote(remote)
 
-    // Seed nearby real-world spots and start real GPS tracking.
+    // Seed nearby real-world spots and start movement (real GPS, or dev sim).
     this.maybeFetchPois()
-    this.startGeo()
+    if (this.sim) this._startSim()
+    else this.startGeo()
   }
 
   buildMarker() {
@@ -197,6 +197,7 @@ export class MapController {
     clearTimeout(this.saveT)
     clearTimeout(this.syncT)
     clearTimeout(this.toastT)
+    clearInterval(this._simTick)
     ;(this._sizeTimers || []).forEach(clearTimeout)
     if (this.geoWatch != null && navigator.geolocation) {
       navigator.geolocation.clearWatch(this.geoWatch)
@@ -300,6 +301,45 @@ export class MapController {
     ])
   }
 
+  // ---- dev GPS emulation ----
+  _startSim() {
+    this.emit('onStatus', 'SIM — スティックで移動 / 地図クリック・都市で瞬間移動')
+    this.map.on('click', (e) => this.simTeleport(e.latlng.lat, e.latlng.lng))
+    clearInterval(this._simTick)
+    this._simTick = setInterval(() => {
+      if (this._simVec) this.simStep(this._simVec.heading, this._simVec.speed)
+    }, 100)
+  }
+  // heading: radians from north, clockwise. speed: m/s (0 = stop).
+  setSimVector(heading, speed) {
+    this._simVec = speed > 0 ? { heading, speed } : null
+  }
+  simStep(heading, speed) {
+    if (!this.map) return
+    const dist = speed * 0.1 // per 100ms tick
+    const nLat = this.pos.lat + (Math.cos(heading) * dist) / 111320
+    const nLng = this.pos.lng + (Math.sin(heading) * dist) / this.mPerLng(this.pos.lat)
+    this.applyPosition({ lat: nLat, lng: nLng }, heading)
+  }
+  simTeleport(lat, lng) {
+    if (!this.map) return
+    this.pos = { lat, lng }
+    this._applyBounds(this.pos)
+    this.follow = true
+    this.map.setView([lat, lng], Math.max(this.map.getZoom(), 15))
+    this.marker.setLatLng([lat, lng])
+    this.visited.push({ lat, lng })
+    this.addCells(this.pos)
+    this._lastFetch = null // force a fresh POI fetch around the new area
+    this.maybeFetchPois()
+    this.checkStops()
+    this.updateBlips()
+    this.refreshStats()
+    this.requestFog()
+    this.saveDebounced()
+    this.syncDebounced()
+  }
+
   // ---- spot discovery (PokéStop-style) ----
   isDiscovered(name) {
     return this.discoveredNames.has(name)
@@ -394,12 +434,19 @@ export class MapController {
     // Only render markers for spots in (or near) the current view; discovered
     // spots always show, undiscovered ones only when near the player.
     const bounds = this.map.getBounds().pad(0.25)
-    const want = new Map() // name -> 'found' | 'hint'
+    const discovered = []
+    const hints = []
     for (const s of this.stops.values()) {
       if (!bounds.contains([s.lat, s.lng])) continue
-      if (this.isDiscovered(s.name)) want.set(s.name, 'found')
-      else if (this.nearPlayer(s)) want.set(s.name, 'hint')
+      if (this.isDiscovered(s.name)) discovered.push(s)
+      else if (this.nearPlayer(s)) hints.push(s)
     }
+    // Cap the blinking "?" hints to the nearest handful — fewer animated markers
+    // keeps panning smooth in dense areas.
+    if (this.pos) hints.sort((a, b) => this.distM(this.pos, a) - this.distM(this.pos, b))
+    const want = new Map() // name -> 'found' | 'hint'
+    for (const s of discovered) want.set(s.name, 'found')
+    for (const s of hints.slice(0, 12)) want.set(s.name, 'hint')
     // remove markers no longer wanted (or whose state changed)
     for (const name in this.lmMarkers) {
       if (want.get(name) !== this.lmMarkers[name].kind) {
@@ -447,11 +494,11 @@ export class MapController {
 
   // ---- fog rendering ----
   applyFogStyle() {
-    // Canvas fog can't use backdrop-filter, so the fog is a near-opaque dark
-    // veil. High opacity keeps fogged areas clearly distinct from the bright,
-    // revealed map (the previous translucent veil was too easy to see through).
+    // Frosted-glass look: unrevealed areas are covered by a light, milky,
+    // translucent haze (you can faintly see the map through it), which reads as
+    // clearly different from the sharp, clear revealed areas. 'black' stays dark.
     const st = this.fogStyleV()
-    this.fogFill = st === 'black' ? '#04070c' : 'rgba(4,6,11,0.95)'
+    this.fogFill = st === 'black' ? 'rgba(4,6,11,0.95)' : 'rgba(202,214,232,0.6)'
     this.requestFog()
   }
 
@@ -480,8 +527,8 @@ export class MapController {
     if (!size.x || !size.y) return
     // Cover the viewport plus padding so short pans don't reveal an un-fogged
     // edge before the next redraw.
-    const padX = Math.round(size.x * 0.4)
-    const padY = Math.round(size.y * 0.4)
+    const padX = Math.round(size.x * 0.3)
+    const padY = Math.round(size.y * 0.3)
     const w = size.x + padX * 2
     const h = size.y + padY * 2
     // Position the canvas in the map's layer coordinate space; Leaflet then
@@ -489,7 +536,9 @@ export class MapController {
     const topLeft = map.containerPointToLayerPoint([-padX, -padY])
     L.DomUtil.setPosition(cv, topLeft)
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    // The fog is soft, so a low-res canvas is fine — and much cheaper to draw
+    // and GPU-composite while panning (perf).
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.25)
     if (cv.width !== w * dpr || cv.height !== h * dpr) {
       cv.width = w * dpr
       cv.height = h * dpr
