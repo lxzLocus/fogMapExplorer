@@ -88,16 +88,30 @@ export class MapController {
     this.cells = new Set(local.cells || [])
     if (!local.cells) this.visited.forEach((p) => this.addCells(p))
 
+    // Keep the player inside the play area — no panning out into empty map.
+    const M = 0.2 // ~22km margin around the scoring bounds (greater Tokyo)
+    const maxBounds = [
+      [BOUNDS.latMin - M, BOUNDS.lngMin - M],
+      [BOUNDS.latMax + M, BOUNDS.lngMax + M],
+    ]
     const map = L.map(this.container, {
       center: [this.pos.lat, this.pos.lng],
       zoom: 15,
+      minZoom: 12,
+      maxZoom: 19,
       zoomControl: false,
       attributionControl: true,
+      maxBounds,
+      maxBoundsViscosity: 1.0,
     })
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; OpenStreetMap &copy; CARTO',
       maxZoom: 19,
     }).addTo(map)
+    // The CARTO dark tiles are very dark; brighten them so revealed areas read
+    // as clearly "lit up" against the near-opaque fog.
+    const tilePane = map.getPane('tilePane')
+    if (tilePane) tilePane.style.filter = 'brightness(1.55) contrast(1.08)'
     this.map = map
 
     // Fog lives in its own Leaflet pane as a <canvas>. Because it's a child of
@@ -354,10 +368,11 @@ export class MapController {
 
   // ---- fog rendering ----
   applyFogStyle() {
-    // Canvas fog can't use backdrop-filter, so the fog is a dark veil over the
-    // (already dark) map. 'black' = opaque; otherwise a strong translucent veil.
+    // Canvas fog can't use backdrop-filter, so the fog is a near-opaque dark
+    // veil. High opacity keeps fogged areas clearly distinct from the bright,
+    // revealed map (the previous translucent veil was too easy to see through).
     const st = this.fogStyleV()
-    this.fogFill = st === 'black' ? '#04070c' : 'rgba(6,9,14,0.86)'
+    this.fogFill = st === 'black' ? '#04070c' : 'rgba(4,6,11,0.95)'
     this.requestFog()
   }
 
@@ -419,7 +434,7 @@ export class MapController {
       if (cx < -rpx || cx > w + rpx || cy < -rpx || cy > h + rpx) continue
       const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rpx)
       g.addColorStop(0, 'rgba(0,0,0,1)')
-      g.addColorStop(0.65, 'rgba(0,0,0,1)')
+      g.addColorStop(0.78, 'rgba(0,0,0,1)')
       g.addColorStop(1, 'rgba(0,0,0,0)')
       ctx.fillStyle = g
       ctx.beginPath()
