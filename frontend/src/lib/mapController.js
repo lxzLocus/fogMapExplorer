@@ -120,7 +120,7 @@ export class MapController {
     // Brighten the very dark CARTO tiles so revealed areas are clearly visible.
     // The frosted fog dims + blurs these underneath, so fog still reads darker.
     const tilePane = map.getPane('tilePane')
-    if (tilePane) tilePane.style.filter = 'brightness(1.55) contrast(1.05)'
+    if (tilePane) tilePane.style.filter = 'brightness(2) contrast(1.05)'
     // Constrain panning to a generous box around wherever the player is (not a
     // fixed Tokyo box), so the map works at the user's real location too.
     this._applyBounds(this.pos)
@@ -509,11 +509,11 @@ export class MapController {
       el.style.backdropFilter = el.style.webkitBackdropFilter = 'none'
       el.style.background = '#04070c'
     } else {
-      // Frosted glass: blur + slightly dim the (brightened) map underneath, plus
-      // a faint cool tint. Reads as clearly hazy vs the sharp, revealed areas.
-      el.style.background = 'rgba(140,160,190,0.10)'
+      // Frosted glass, dark: blur the map underneath and darken it heavily so
+      // unrevealed areas are nearly black against the bright revealed map.
+      el.style.background = 'rgba(3,5,9,0.7)'
       el.style.backdropFilter = el.style.webkitBackdropFilter =
-        'blur(8px) brightness(0.82) saturate(0.85)'
+        'blur(9px) brightness(0.4) saturate(0.8)'
     }
     this.requestFog()
   }
