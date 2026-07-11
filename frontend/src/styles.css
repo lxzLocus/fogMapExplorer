@@ -11,6 +11,9 @@ body,
 #root {
   height: 100%;
   margin: 0;
+  /* Fill every uncovered area (incl. the iOS home-indicator safe area) with the
+     app's dark colour instead of the system's default grey. */
+  background: #0a0d12;
 }
 
 /* Dynamic viewport height: fills the whole screen incl. safe areas in an
@@ -24,7 +27,6 @@ body,
 }
 
 body {
-  background: #0a0d12;
   font-family: 'Noto Sans JP', system-ui, sans-serif;
   overflow: hidden;
   overscroll-behavior: none;

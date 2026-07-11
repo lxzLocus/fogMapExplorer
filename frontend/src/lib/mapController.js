@@ -527,7 +527,7 @@ export class MapController {
     // shows through faintly) yet clearly distinct from the sharp, bright
     // revealed areas. Drawn on a canvas in the pane, so it tracks perfectly.
     const st = this.fogStyleV()
-    this.fogFill = st === 'black' ? '#04070c' : 'rgba(4,6,11,0.95)'
+    this.fogFill = st === 'black' ? '#04070c' : 'rgba(4,6,11,0.99)'
     this.requestFog()
   }
 
@@ -586,7 +586,7 @@ export class MapController {
     const ctx = this.fogCtx
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
-    ctx.fillStyle = this.fogFill || 'rgba(4,6,11,0.95)'
+    ctx.fillStyle = this.fogFill || 'rgba(4,6,11,0.99)'
     ctx.fillRect(0, 0, w, h)
     // Cut clear holes where the player has been.
     ctx.globalCompositeOperation = 'destination-out'
