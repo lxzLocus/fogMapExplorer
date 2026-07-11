@@ -153,9 +153,9 @@ export default function App() {
         top: 0,
         left: 0,
         right: 0,
-        // 100dvh spans the full screen (incl. bottom safe area) in a standalone
-        // iOS PWA, where `inset: 0` / 100vh can stop short of the home indicator.
-        height: '100dvh',
+        // --app-h is the JS-measured screen height (set in main.jsx); 100dvh is
+        // the fallback. Reaches the bottom safe area where inset:0 / 100vh don't.
+        height: 'var(--app-h, 100dvh)',
         background: '#0a0d12',
         overflow: 'hidden',
       }}
@@ -435,7 +435,7 @@ export default function App() {
           borderTop: '1px solid rgba(255,255,255,.1)',
           borderTopLeftRadius: 18,
           borderTopRightRadius: 18,
-          padding: `8px 14px calc(min(${SAFE_BOTTOM}, 34px) + 8px)`,
+          padding: `8px 14px calc(${SAFE_BOTTOM} + 8px)`,
         }}
       >
         <TabButton icon="◈" label="マップ" bg={tabBg('map')} color={tabColor('map')} onClick={() => setTab('map')} />
