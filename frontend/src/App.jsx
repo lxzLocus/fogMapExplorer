@@ -406,22 +406,24 @@ export default function App() {
         </div>
       )}
 
-      {/* bottom tab bar */}
+      {/* bottom tab bar — anchored to the bottom edge, filling the safe area so
+          there's no empty gap under it on iOS PWA */}
       <div
         style={{
           position: 'absolute',
-          left: 14,
-          right: 14,
-          bottom: `calc(${SAFE_BOTTOM} + 14px)`,
+          left: 0,
+          right: 0,
+          bottom: 0,
           zIndex: 540,
           display: 'flex',
           gap: 6,
-          background: 'rgba(8,11,16,.85)',
+          background: 'rgba(8,11,16,.92)',
           backdropFilter: 'blur(12px)',
           WebkitBackdropFilter: 'blur(12px)',
-          border: '1px solid rgba(255,255,255,.1)',
-          borderRadius: 16,
-          padding: 6,
+          borderTop: '1px solid rgba(255,255,255,.1)',
+          borderTopLeftRadius: 18,
+          borderTopRightRadius: 18,
+          padding: `8px 14px calc(min(${SAFE_BOTTOM}, 34px) + 8px)`,
         }}
       >
         <TabButton icon="◈" label="マップ" bg={tabBg('map')} color={tabColor('map')} onClick={() => setTab('map')} />

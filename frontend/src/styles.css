@@ -49,6 +49,10 @@ button {
   color: #4a5568 !important;
   font-size: 9px !important;
 }
+/* Lift the required attribution above the bottom tab bar so it stays visible. */
+.leaflet-bottom {
+  bottom: calc(min(env(safe-area-inset-bottom, 0px), 34px) + 70px);
+}
 .leaflet-control-attribution a {
   color: #5a6a80 !important;
 }
