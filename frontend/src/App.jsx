@@ -149,13 +149,12 @@ export default function App() {
   return (
     <div
       style={{
+        // Fixed + inset:0 covers the actual viewport = the full screen in a
+        // standalone PWA (with viewport-fit=cover), and the area above the
+        // toolbar in a browser. The tab bar's own safe-area padding handles the
+        // home indicator.
         position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        // --app-h is the JS-measured screen height (set in main.jsx); 100dvh is
-        // the fallback. Reaches the bottom safe area where inset:0 / 100vh don't.
-        height: 'var(--app-h, 100dvh)',
+        inset: 0,
         background: '#0a0d12',
         overflow: 'hidden',
       }}
@@ -418,11 +417,11 @@ export default function App() {
         </div>
       )}
 
-      {/* bottom tab bar — anchored to the bottom edge, filling the safe area so
-          there's no empty gap under it on iOS PWA */}
+      {/* bottom tab bar — fixed to the viewport bottom (pins to the real screen
+          edge in a standalone PWA), filling the safe area so there's no gap */}
       <div
         style={{
-          position: 'absolute',
+          position: 'fixed',
           left: 0,
           right: 0,
           bottom: 0,
