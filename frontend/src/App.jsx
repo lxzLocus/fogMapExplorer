@@ -147,7 +147,19 @@ export default function App() {
   const SAFE_BOTTOM = 'env(safe-area-inset-bottom, 0px)'
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: '#0a0d12', overflow: 'hidden' }}>
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        // 100dvh spans the full screen (incl. bottom safe area) in a standalone
+        // iOS PWA, where `inset: 0` / 100vh can stop short of the home indicator.
+        height: '100dvh',
+        background: '#0a0d12',
+        overflow: 'hidden',
+      }}
+    >
       {/* MAP (the fog is drawn on a canvas inside a Leaflet pane) */}
       <div ref={mapRef} style={{ position: 'absolute', inset: 0 }} />
 
